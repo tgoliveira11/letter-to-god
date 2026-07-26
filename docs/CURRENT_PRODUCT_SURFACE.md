@@ -40,7 +40,7 @@ Private encrypted notes vault (web). Account auth via `@tgoliveira/secure-auth`;
 | `/notes/weekly-reflection` | Session + vault | Shipped | Weekly reflection |
 | `/vault/setup` | Session | Shipped | Vault + recovery phrase setup |
 | `/vault/unlock` | Session (no vault gate) | Shipped | Vault unlock |
-| `/vault/settings` | Session + vault | Shipped | Vault passkeys, recovery |
+| `/vault/settings` | Session + vault | Shipped | Vault passkeys (including bulk reset that preserves account sign-in passkeys), recovery |
 | `/vault/security` | Session + vault | Shipped | Security events |
 | `/vault/recovery` | Session | Shipped | Recovery phrase unlock |
 | `/settings/account` | Session | Shipped | Profile, delete account |
@@ -81,7 +81,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | **Vault admin** | `/api/vault/admin/config` | Runtime vault config overrides (platform admin; requires `vault_admin_config_overrides` table) |
 | **Account** | `/api/account/*` | Profile, sessions, passkeys, 2FA, change password |
 | **Vault** | `/api/vault/*` | Setup, status, settings, index, unlock envelopes, recovery phrase, storage |
-| **Passkeys (vault)** | `/api/passkeys/*` | Vault passkey register/authenticate |
+| **Passkeys (vault)** | `/api/passkeys/*` | Vault passkey register/authenticate, browser binding, and scoped bulk reset |
 | **Notes** | `/api/notes`, `/api/notes/[id]` | Encrypted CRUD only |
 | **Note versions** | `/api/notes/[id]/versions/*` | Encrypted version history |
 | **Attachments** | `/api/notes/[id]/attachments/*` | Encrypted attachments |
@@ -103,7 +103,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | Audio file upload transcribe | Shipped | On-device decode ladder |
 | Encrypted local drafts | Shipped | IndexedDB; not server plaintext |
 | Vault auto-lock | Shipped | Client session timer |
-| Passkey PRF vault unlock | Shipped | vault-core 1.3 candidates; synced credentials may have bounded compatibility variants and several HttpOnly-cookie browser bindings |
+| Passkey PRF vault unlock | Shipped | vault-core 1.3 candidates; synced credentials may have bounded compatibility variants and several HttpOnly-cookie browser bindings; bulk vault reset preserves account sign-in passkeys |
 | Note Kanban generation | Shipped | Deterministic on-device parsing of decrypted note markdown; no LLM/plaintext egress |
 | Note ↔ Kanban bidirectional sync | Shipped | Note-bound boards sync checklist/list structure and card state client-side (debounced); encryption unchanged |
 | MCP AI integrations | Shipped (when `INTEGRATIONS_ENABLED`) | Local MCP server + optional bridge; scoped read/write on shared notes/boards only |

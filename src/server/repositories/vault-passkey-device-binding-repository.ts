@@ -128,10 +128,12 @@ export const vaultPasskeyDeviceBindingRepository = {
     return Boolean(deleted);
   },
 
-  async deleteAllByUserId(userId: string, client: DbClient = db) {
-    return client
+  async deleteAllByUserId(userId: string, client: DbClient = db): Promise<string[]> {
+    const deleted = await client
       .delete(vaultPasskeyDeviceBindings)
-      .where(eq(vaultPasskeyDeviceBindings.userId, userId));
+      .where(eq(vaultPasskeyDeviceBindings.userId, userId))
+      .returning({ id: vaultPasskeyDeviceBindings.id });
+    return deleted.map((binding) => binding.id);
   },
 
   async touchLastUsedAt(id: string, userId: string, client: DbClient = db) {

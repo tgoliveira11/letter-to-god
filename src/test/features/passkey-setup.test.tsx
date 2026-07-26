@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   wrapVaultKeyForPasskey: vi.fn(),
   unlockCandidates: vi.fn(),
   resolveCapability: vi.fn(),
-  removeAll: vi.fn(),
+  removeAllVaultUnlock: vi.fn(),
 }));
 
 vi.mock("@/lib/crypto-client/vault", () => ({
@@ -44,7 +44,7 @@ vi.mock("@/lib/api-client/client", () => ({
 
 vi.mock("@/lib/api-client/passkeys", () => ({
   passkeysApi: {
-    removeAll: mocks.removeAll,
+    removeAllVaultUnlock: mocks.removeAllVaultUnlock,
   },
 }));
 

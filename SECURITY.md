@@ -47,6 +47,7 @@ Account passkeys and vault passkeys are **independent**.
 - Signing in with an account passkey never unlocks the vault by itself.
 - Vault-only setup first creates `signInEnabled: false`, `vaultUnlockEnabled: false`. Vault capability is enabled only after a separate authentication ceremony, browser-local PRF confirmation, encrypted envelope persistence, local candidate unwrap, and binding persistence.
 - Vault unlock WebAuthn: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` includes only active vault credentials and preserves persisted transports. A missing binding uses an explicit allow-list; a stale/inactive binding fails closed with 409 and is cleared. Vault-only disable revokes the credential; dual-purpose disable clears only vault capability.
+- Bulk reset from unlocked `/vault/settings` uses `DELETE /api/passkeys/vault-unlock`: it atomically revokes every vault-only credential and passkey envelope, removes all browser bindings, clears vault capability on dual-purpose credentials, and preserves account sign-in capability. The product layer never deletes account passkeys through this operation.
 
 - Passkeys must not be used as raw encryption keys
 - Account session alone never unlocks the vault
@@ -300,7 +301,7 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 - If PRF is unavailable, a passkey vault envelope is **not** created and existing variants are **not** revoked
 - PRF diagnostics: `src/lib/passkey/passkey-prf-diagnostics.ts`; audits `docs/archive/PASSKEY_VAULT_UNLOCK_DIAGNOSTIC_AUDIT.md`, `docs/archive/PASSKEY_VAULT_SETUP_AVAILABILITY_AUDIT.md`
 - Availability state: `src/lib/passkey/vault-passkey-availability.ts` — missing account passkey is never reported as browser unsupported; configured envelopes stay read-only in PRF-incompatible browsers
-- Primary UX: `/vault/settings` (not `/vault/recovery`) for enable/test/replace/disable; PRF-unsupported browsers see read-only status and cannot disable/replace without a PRF ceremony proof
+- Primary UX: `/vault/settings` (not `/vault/recovery`) for enable/test/replace/disable. Per-credential disable requires a PRF ceremony proof. The explicit bulk reset is available only while the vault is locally unlocked and removes the entire vault-owned passkey capability without changing account sign-in passkeys.
 - Vault unlock `returnTo` query param is sanitized (`sanitizeVaultReturnTo`) to internal paths only (`/notes`, `/vault/settings`, `/vault/security`, `/vault/recovery`, `/settings/account`); disabling vault unlock requires an opaque proof issued after server verification and a browser-local matched variant. PRF extension results are never sent.
 
 All explicit unlock methods promote the recovered User Vault Key through the client vault-session

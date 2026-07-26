@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { PasskeyVaultUnlockSetup } from "@/features/passkey/passkey-vault-unlock-setup";
 import {
   PASSKEY_VAULT_UNLOCK_DISABLED_MESSAGE,
@@ -386,6 +386,53 @@ describe("PasskeyVaultUnlockSetup", () => {
       });
     });
     expect(await screen.findByText(PASSKEY_VAULT_UNLOCK_DISABLED_MESSAGE)).toBeTruthy();
+  });
+
+  it("removes all vault passkeys while explicitly preserving account sign-in passkeys", async () => {
+    mockVaultUnlockList([
+      {
+        id: "pk-vault-only",
+        friendlyName: "Vault passkey",
+        signInEnabled: false,
+        vaultUnlockEnabled: true,
+        prfSupported: true,
+        credentialId: "cred-vault-only",
+      },
+      {
+        id: "pk-dual",
+        friendlyName: "Account and vault passkey",
+        signInEnabled: true,
+        vaultUnlockEnabled: true,
+        prfSupported: true,
+        credentialId: "cred-dual",
+      },
+    ]);
+    mocks.apiDelete.mockResolvedValue({
+      success: true,
+      removedVaultPasskeyCount: 2,
+      preservedSignInPasskeyCount: 1,
+    });
+
+    render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: /remove all vault passkeys/i })
+    );
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(
+      within(dialog).getByText(/account sign-in passkeys will not be changed/i)
+    ).toBeTruthy();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /remove all vault passkeys/i })
+    );
+
+    await waitFor(() => {
+      expect(mocks.apiDelete).toHaveBeenCalledWith("/api/passkeys/vault-unlock");
+    });
+    expect(mocks.startAuthentication).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/removed from every passkey and browser/i)
+    ).toBeTruthy();
   });
 
   it("shows read-only configured state without destructive actions in unsupported browser", async () => {

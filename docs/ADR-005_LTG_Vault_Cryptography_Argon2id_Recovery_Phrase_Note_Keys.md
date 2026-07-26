@@ -92,6 +92,10 @@ Implementation: `@tgoliveira/vault-core` (Argon2id KDF); SelahKeep wrappers in `
 
 Phase 1 creates exactly one `password` and one `recovery_phrase` envelope at setup.
 
+### Passkey envelope removal
+
+Passkey PRF crypto and candidate handling remain owned by `@tgoliveira/vault-core`; SelahKeep owns credential rows, envelope persistence, browser bindings, and transactions. A bulk vault-passkey reset revokes all active `passkey_authorized_device` envelopes and vault-only credentials, removes browser bindings, and clears only vault capability from credentials that are also used for account sign-in. It does not rotate the UVK, password envelope, or recovery phrase envelope, and it never deletes account-passkey capability from the vault product boundary.
+
 ---
 
 ## 5. Recovery phrase

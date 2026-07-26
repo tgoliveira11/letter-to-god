@@ -598,36 +598,65 @@ export const passkeyService = {
     };
   },
 
-  async removeAll(userId: string) {
-    const credentials = await passkeyRepository.findByUserId(userId);
-    const envelope = await vaultRepository.findActiveEnvelopeByMethod(
-      userId,
-      "passkey_authorized_device"
-    );
-
-    if (credentials.length === 0 && !envelope) {
-      throw new NotFoundError("No passkey configured");
-    }
+  async removeAllVaultUnlockCredentials(userId: string) {
+    let removedBindingIds: string[] = [];
+    let removedVaultPasskeyCount = 0;
+    let preservedSignInPasskeyCount = 0;
 
     await runInTransaction(async (tx) => {
-      for (const credential of credentials) {
+      const credentialsBeforeLock = await passkeyRepository.findByUserId(userId, tx);
+      for (const credential of [...credentialsBeforeLock].sort((left, right) =>
+        left.id.localeCompare(right.id)
+      )) {
         await passkeyRepository.lockForVaultMutation(credential.id, userId, tx);
       }
-      await passkeyRepository.revokeAllByUserId(userId, tx);
 
-      await vaultPasskeyDeviceBindingRepository.deleteAllByUserId(userId, tx);
+      // Re-read after acquiring every existing credential lock so an in-flight
+      // enable/append that completed before this reset is included in the reset.
+      const credentials = await passkeyRepository.findByUserId(userId, tx);
+      const vaultCredentials = credentials.filter((credential) => credential.vaultUnlockEnabled);
+      const envelopes = await vaultRepository.findActiveEnvelopesByUserId(userId, tx);
+      const passkeyEnvelopes = envelopes.filter(
+        (envelope) => envelope.method === "passkey_authorized_device"
+      );
 
-      const envelopes = await vaultRepository.findActiveEnvelopesByUserId(userId);
-      for (const item of envelopes) {
-        if (item.method === "passkey_authorized_device") {
-          await vaultRepository.revokeEnvelope(item.id, userId, tx);
-        }
+      if (vaultCredentials.length === 0 && passkeyEnvelopes.length === 0) {
+        throw new NotFoundError("No vault unlock passkey configured");
       }
 
-      await auditRepository.record("passkey_removed", userId, undefined, tx);
+      for (const credential of vaultCredentials) {
+        if (credential.signInEnabled) {
+          await passkeyRepository.updateCredentialFlags(
+            credential.id,
+            userId,
+            { vaultUnlockEnabled: false },
+            tx
+          );
+          preservedSignInPasskeyCount += 1;
+        } else {
+          await passkeyRepository.revoke(credential.id, userId, tx);
+        }
+        removedVaultPasskeyCount += 1;
+      }
+
+      removedBindingIds = await vaultPasskeyDeviceBindingRepository.deleteAllByUserId(userId, tx);
+
+      for (const envelope of passkeyEnvelopes) {
+        await vaultRepository.revokeEnvelope(envelope.id, userId, tx);
+      }
+
+      if (vaultCredentials.some((credential) => !credential.signInEnabled)) {
+        await auditRepository.record("passkey_removed", userId, undefined, tx);
+      }
+      await auditRepository.record("passkey_vault_unlock_disabled", userId, undefined, tx);
     });
 
-    return { success: true };
+    return {
+      success: true,
+      removedBindingIds,
+      removedVaultPasskeyCount,
+      preservedSignInPasskeyCount,
+    };
   },
 };
 

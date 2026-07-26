@@ -268,8 +268,8 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
     setOutcome("idle");
 
     try {
-      await passkeysApi.removeAll();
-      setMessage("Passkey removed.");
+      await passkeysApi.removeAllVaultUnlock();
+      setMessage("Passkey vault unlock was removed. Account sign-in passkeys were preserved.");
       onStatusChange();
     } catch (e) {
       setOutcome("failed");
@@ -290,7 +290,7 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
           variant="danger"
           className="w-full sm:w-auto"
         >
-          Remove passkey
+          Remove all vault passkeys
         </Button>
         {message && <SuccessState message={message} />}
         {error && (
@@ -300,9 +300,9 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         )}
         <ConfirmDialog
           open={removeOpen}
-          title="Remove passkey?"
-          description="You will no longer be able to unlock your vault with this passkey on new devices."
-          confirmLabel="Remove passkey"
+          title="Remove all vault passkeys?"
+          description="You will no longer be able to unlock your vault with any passkey. Account sign-in passkeys will not be changed."
+          confirmLabel="Remove all vault passkeys"
           loading={loading}
           onConfirm={handleRemovePasskey}
           onCancel={() => setRemoveOpen(false)}
