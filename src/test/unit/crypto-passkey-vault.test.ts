@@ -7,6 +7,7 @@ import {
   wrapVaultKeyForPasskey,
   unwrapVaultKeyFromPasskey,
   unlockVaultFromPasskeyEnvelope,
+  unlockVaultFromPasskeyEnvelopeCandidates,
 } from "@/lib/crypto-client/passkey-vault";
 import { generateUserVaultKey } from "@/lib/crypto-client/vault";
 import { USER_ID } from "@/test/helpers/fixtures";
@@ -58,6 +59,40 @@ describe("passkey vault crypto", () => {
     const envelope = await wrapVaultKeyForPasskey(vaultKey, prfOutput, USER_ID, USER_ID);
     const restored = await unlockVaultFromPasskeyEnvelope(USER_ID, envelope, prfOutput);
     expect(restored).toBeTruthy();
+  });
+
+  it("selects a matching synced-passkey envelope candidate locally", async () => {
+    const vaultKey = await generateUserVaultKey();
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32));
+    const encryptedVaultKey = await wrapVaultKeyForPasskey(
+      vaultKey,
+      prfOutput,
+      USER_ID,
+      USER_ID
+    );
+
+    const result = await unlockVaultFromPasskeyEnvelopeCandidates({
+      userId: USER_ID,
+      verifiedCredentialId: "credential-1",
+      candidates: [
+        {
+          envelopeVariantId: "variant-1",
+          credentialId: "credential-1",
+          envelope: {
+            method: "passkey_prf",
+            encryptedVaultKey,
+            kdfMetadata: null,
+          },
+        },
+      ],
+      prfOutput,
+    });
+
+    expect(result.status).toBe("matched");
+    if (result.status === "matched") {
+      expect(result.envelopeVariantId).toBe("variant-1");
+      expect(await userVaultKeysEqual(result.vaultKey, vaultKey)).toBe(true);
+    }
   });
 
   it("rejects passkey unlock when PRF is required but unavailable", async () => {

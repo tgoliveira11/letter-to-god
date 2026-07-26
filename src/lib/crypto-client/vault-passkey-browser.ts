@@ -48,3 +48,8 @@ export function extractPasskeyPrfOutput(
     { credentialId }
   );
 }
+
+export {
+  resolvePasskeyPrfCapability,
+  sanitizeWebAuthnResponseForServer,
+} from "@tgoliveira/vault-core/browser";

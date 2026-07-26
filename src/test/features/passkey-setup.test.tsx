@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   startAuthentication: vi.fn(),
   extractPasskeyPrfOutput: vi.fn(),
   wrapVaultKeyForPasskey: vi.fn(),
+  unlockCandidates: vi.fn(),
+  resolveCapability: vi.fn(),
   removeAll: vi.fn(),
 }));
 
@@ -54,6 +56,12 @@ vi.mock("@simplewebauthn/browser", () => ({
 vi.mock("@/lib/crypto-client/passkey-vault", () => ({
   extractPasskeyPrfOutput: mocks.extractPasskeyPrfOutput,
   wrapVaultKeyForPasskey: mocks.wrapVaultKeyForPasskey,
+  unlockVaultFromPasskeyEnvelopeCandidates: mocks.unlockCandidates,
+}));
+
+vi.mock("@tgoliveira/vault-core/browser", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tgoliveira/vault-core/browser")>()),
+  resolvePasskeyPrfCapability: mocks.resolveCapability,
 }));
 
 vi.mock("@/lib/passkey/prepare-webauthn-options", () => ({
@@ -85,7 +93,12 @@ describe("PasskeySetup", () => {
         return { challenge: "reg-challenge" };
       }
       if (path === "/api/passkeys/register" && body?.action === "verify") {
-        return { verified: true, credentialId: "cred-id", credentialDbId: "pk-new" };
+        return {
+          verified: true,
+          credentialId: "cred-id",
+          verifiedCredentialId: "cred-id",
+          credentialDbId: "pk-new",
+        };
       }
       if (path.endsWith("/enable-vault-unlock") && body?.action === "options") {
         return {
@@ -95,7 +108,22 @@ describe("PasskeySetup", () => {
         };
       }
       if (path.endsWith("/enable-vault-unlock") && body?.action === "verify") {
-        return { success: true };
+        return {
+          verified: true,
+          verifiedCredentialId: "cred-id",
+          enrollmentProof: "enrollment-proof",
+        };
+      }
+      if (path.endsWith("/enable-vault-unlock") && body?.action === "persist") {
+        return {
+          success: true,
+          verifiedCredentialId: "cred-id",
+          envelopeVariantId: "550e8400-e29b-41d4-a716-446655440001",
+          bindingProof: "binding-proof",
+        };
+      }
+      if (path === "/api/passkeys/authenticate" && body?.action === "bind") {
+        return { bindingId: "binding-1" };
       }
       return {};
     });
@@ -109,6 +137,13 @@ describe("PasskeySetup", () => {
     });
     mocks.extractPasskeyPrfOutput.mockReturnValue(new Uint8Array(32));
     mocks.wrapVaultKeyForPasskey.mockResolvedValue({ version: "enc-v1" });
+    mocks.resolveCapability.mockReturnValue({ state: "confirmed_authentication" });
+    mocks.unlockCandidates.mockResolvedValue({
+      status: "matched",
+      envelopeVariantId: "550e8400-e29b-41d4-a716-446655440001",
+      candidateIndex: 0,
+      vaultKey: {} as CryptoKey,
+    });
     window.confirm = vi.fn(() => true);
   });
 
@@ -139,9 +174,20 @@ describe("PasskeySetup", () => {
         "/api/account/passkeys/pk-new/enable-vault-unlock",
         expect.objectContaining({
           action: "verify",
-          encryptedVaultKey: { version: "enc-v1" },
-          prfVaultEnvelope: true,
+          response: expect.any(Object),
         })
+      );
+      expect(mocks.apiPost).toHaveBeenCalledWith(
+        "/api/account/passkeys/pk-new/enable-vault-unlock",
+        expect.objectContaining({
+          action: "persist",
+          encryptedVaultKey: { version: "enc-v1" },
+          enrollmentProof: "enrollment-proof",
+        })
+      );
+      expect(mocks.apiPost).toHaveBeenCalledWith(
+        "/api/passkeys/authenticate",
+        expect.objectContaining({ action: "bind", selectedEnvelopeVariantId: expect.any(String) })
       );
     });
     expect(await screen.findByText(PASSKEY_VAULT_REGISTERED_MESSAGE)).toBeTruthy();
@@ -182,7 +228,7 @@ describe("PasskeySetup", () => {
     // registered (reg options + reg verify) and the enable options are requested,
     // but the enable verify (which carries the envelope) is never sent.
     expect(mocks.wrapVaultKeyForPasskey).not.toHaveBeenCalled();
-    expect(mocks.apiPost).toHaveBeenCalledTimes(3);
+    expect(mocks.apiPost).toHaveBeenCalledTimes(4);
     expect(
       await screen.findByText(/Authentication completed, but your passkey or browser did not return PRF output/i)
     ).toBeTruthy();

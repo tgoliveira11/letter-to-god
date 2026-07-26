@@ -2,15 +2,17 @@ import {
   unlockWithPasskeyPrfEnvelope,
   unlockVaultFromPasskeyEnvelope as unlockVaultFromPasskeyEnvelopeCore,
   unwrapVaultKeyFromPasskey as unwrapVaultKeyFromPasskeyCore,
-  normalizeEnvelopeAadContext,
   VaultKeyNotExtractableError,
   VaultAuthorizationError,
   type EncryptedPayload as VaultCoreEncryptedPayload,
+  type VaultPasskeyEnvelopeVariant,
 } from "@tgoliveira/vault-core";
 import {
   createPasskeyPrfEnvelopeWithSessionCache,
   INNER_VAULT_KEY_CACHE_MISMATCH_MESSAGE,
   cacheVaultInnerKeyMaterialFromPasskeyUnlock,
+  unlockWithPasskeyPrfEnvelopeCandidates,
+  type UnlockPasskeyPrfEnvelopeCandidatesResult,
 } from "@tgoliveira/vault-core/browser";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
 import { setUnlockedVaultSession } from "@/lib/crypto-client/vault-session";
@@ -62,10 +64,7 @@ export async function unwrapVaultKeyFromPasskey(
   options?: { applySession?: boolean; userId?: string; resourceId?: string }
 ): Promise<CryptoKey> {
   const scope = envelopeScope(options?.userId ?? encryptedVaultKey.aad.userId, options?.resourceId);
-  const payload = normalizeEnvelopeAadContext(
-    asVaultCorePayload(encryptedVaultKey),
-    SELAHKEEP_VAULT_PROFILE
-  );
+  const payload = asVaultCorePayload(encryptedVaultKey);
   const vaultKey = await unwrapVaultKeyFromPasskeyCore(
     payload,
     prfOutput,
@@ -92,10 +91,7 @@ export async function unlockVaultFromPasskeyEnvelope(
   options?: { prfRequired?: boolean; applySession?: boolean; resourceId?: string }
 ): Promise<CryptoKey> {
   const scope = envelopeScope(userId, options?.resourceId);
-  const payload = normalizeEnvelopeAadContext(
-    asVaultCorePayload(encryptedVaultKey),
-    SELAHKEEP_VAULT_PROFILE
-  );
+  const payload = asVaultCorePayload(encryptedVaultKey);
   const vaultKey = await unlockVaultFromPasskeyEnvelopeCore(
     payload,
     prfOutput,
@@ -116,6 +112,48 @@ export async function unlockVaultFromPasskeyEnvelope(
     await setUnlockedVaultSession({ userVaultKey: vaultKey, method: "passkey_prf" });
   }
   return vaultKey;
+}
+
+export async function unlockVaultFromPasskeyEnvelopeCandidates(input: {
+  userId: string;
+  verifiedCredentialId: string;
+  candidates: readonly VaultPasskeyEnvelopeVariant[];
+  prfOutput: Uint8Array | null;
+  applySession?: boolean;
+  cacheInnerKey?: boolean;
+}): Promise<UnlockPasskeyPrfEnvelopeCandidatesResult> {
+  const result = await unlockWithPasskeyPrfEnvelopeCandidates({
+    verifiedCredentialId: input.verifiedCredentialId,
+    candidates: input.candidates,
+    prfOutput: input.prfOutput,
+    expectedScope: envelopeScope(input.userId),
+    profile: SELAHKEEP_VAULT_PROFILE,
+  });
+
+  if (result.status !== "matched") return result;
+
+  const matchedCandidate = input.candidates.find(
+    (candidate) => candidate.envelopeVariantId === result.envelopeVariantId
+  );
+  if (!matchedCandidate) {
+    return {
+      status: "malformed_candidate",
+      reason: "invalid_candidate",
+      candidateIndex: null,
+    };
+  }
+
+  if ((input.cacheInnerKey ?? true) && input.prfOutput) {
+    await cacheVaultInnerKeyMaterialFromPasskeyUnlock(
+      result.vaultKey,
+      matchedCandidate.envelope,
+      input.prfOutput
+    );
+  }
+  if (input.applySession ?? true) {
+    await setUnlockedVaultSession({ userVaultKey: result.vaultKey, method: "passkey_prf" });
+  }
+  return result;
 }
 
 export {

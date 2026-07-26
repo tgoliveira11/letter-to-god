@@ -6,19 +6,17 @@ import { encryptedPayloadSchema } from "@/lib/validation/encrypted-payload";
 import { apiError, parseJsonBody } from "@/lib/api-helpers";
 import { getClientIp } from "@/lib/request-ip";
 import { rejectPasskeyVaultForbiddenFields } from "@/server/policies/passkey-vault-plaintext-rejection";
-import {
-  applyVaultDeviceBindingCookie,
-  readVaultDeviceBindingIdFromCookies,
-} from "@/lib/passkey/vault-device-binding-cookie";
 
-const bodySchema = z.object({
-  action: z.enum(["options", "verify"]),
-  response: z.unknown().optional(),
-  encryptedVaultKey: encryptedPayloadSchema.optional(),
-  prfVaultEnvelope: z.literal(true).optional(),
-  prfSupported: z.boolean().nullable().optional(),
-  deviceLabel: z.string().max(80).optional(),
-});
+const bodySchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("options") }),
+  z.object({ action: z.literal("verify"), response: z.unknown() }),
+  z.object({
+    action: z.literal("persist"),
+    enrollmentProof: z.string().min(20).max(256),
+    encryptedVaultKey: encryptedPayloadSchema,
+    prfSupported: z.literal(true),
+  }),
+]);
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -32,42 +30,38 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: plaintextError }, { status: 400 });
     }
     const parsed = bodySchema.safeParse(body);
-
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const ip = getClientIp(request);
-
     if (parsed.data.action === "options") {
-      const options = await passkeyVaultEnvelopeService.getVaultUnlockAuthOptions(user.id, id, ip);
+      const options = await passkeyVaultEnvelopeService.getVaultUnlockAuthOptions(
+        user.id,
+        id,
+        getClientIp(request)
+      );
       return NextResponse.json(options);
     }
 
-    if (!parsed.data.response || !parsed.data.encryptedVaultKey) {
-      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+    if (parsed.data.action === "verify") {
+      const result = await passkeyVaultEnvelopeService.verifyVaultUnlockEnrollment(
+        user.id,
+        id,
+        parsed.data.response as Parameters<
+          typeof passkeyVaultEnvelopeService.verifyVaultUnlockEnrollment
+        >[2]
+      );
+      return NextResponse.json(result);
     }
 
-    const existingDeviceBindingId = await readVaultDeviceBindingIdFromCookies();
-
-    const result = await passkeyVaultEnvelopeService.enableVaultUnlock(
+    const result = await passkeyVaultEnvelopeService.persistVaultUnlockEnvelope(
       user.id,
       id,
-      parsed.data.response as Parameters<typeof passkeyVaultEnvelopeService.enableVaultUnlock>[2],
+      parsed.data.enrollmentProof,
       parsed.data.encryptedVaultKey,
-      {
-        prfVaultEnvelope: parsed.data.prfVaultEnvelope,
-        prfSupported: parsed.data.prfSupported,
-        deviceLabel: parsed.data.deviceLabel,
-        existingDeviceBindingId,
-      }
+      { prfSupported: parsed.data.prfSupported }
     );
-
-    const response = NextResponse.json(result);
-    if (result.deviceBindingId) {
-      applyVaultDeviceBindingCookie(response, result.deviceBindingId);
-    }
-    return response;
+    return NextResponse.json(result);
   } catch (error) {
     return apiError(error, "POST /api/account/passkeys/:id/enable-vault-unlock");
   }

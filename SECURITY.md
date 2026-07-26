@@ -45,8 +45,8 @@ Account passkeys and vault passkeys are **independent**.
 - A vault passkey unlocks the encrypted vault using WebAuthn PRF after the user is signed in.
 - Users may configure vault passkey unlock without first configuring account passkey sign-in (vault must be unlocked; browser/provider must support PRF).
 - Signing in with an account passkey never unlocks the vault by itself.
-- Vault-only setup: `POST /api/passkeys/register` with `vaultOnly: true` creates `signInEnabled: false`, `vaultUnlockEnabled: true` credentials. Vault-only registration prefers `authenticatorAttachment: "platform"`.
-- Vault unlock WebAuthn: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` — `allowCredentials` includes **only** `vaultUnlockEnabled` credentials; account-only passkeys are excluded. Stored transports are replayed. Vault-only registration uses a separate opaque WebAuthn user handle so Apple password managers do not overwrite it when an account passkey is added. Vault-only disable revokes credential rows; dual-purpose disable clears vault flag only. See `docs/archive/PASSKEY_TOUCH_ID_QR_PROMPT_FIX.md` and `docs/archive/PASSKEY_VAULT_LIFECYCLE.md`.
+- Vault-only setup first creates `signInEnabled: false`, `vaultUnlockEnabled: false`. Vault capability is enabled only after a separate authentication ceremony, browser-local PRF confirmation, encrypted envelope persistence, local candidate unwrap, and binding persistence.
+- Vault unlock WebAuthn: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` includes only active vault credentials and preserves persisted transports. A missing binding uses an explicit allow-list; a stale/inactive binding fails closed with 409 and is cleared. Vault-only disable revokes the credential; dual-purpose disable clears only vault capability.
 
 - Passkeys must not be used as raw encryption keys
 - Account session alone never unlocks the vault
@@ -55,7 +55,7 @@ Account passkeys and vault passkeys are **independent**.
 
 ## Database transactions
 
-Multi-step sensitive flows use `runInTransaction()` (vault init/setup, recovery phrase replace, legacy recovery code store, passkey register/remove). Failures roll back related writes.
+Multi-step sensitive flows use `runInTransaction()` (vault init/setup, recovery phrase replace, legacy recovery code store, passkey register/remove). Passkey variant cap checks, append, disable, and revoke hold the credential row lock; failures roll back related writes.
 
 ## Browser Storage (IndexedDB)
 
@@ -292,11 +292,16 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 - Passkey **authentication** is separate from vault **decryption**
 - Vault envelopes use WebAuthn **PRF** output as key-wrapping key (not raw signature bytes)
 - PRF required for passkey envelopes; **no registration fallback** to device-secret wrapping
-- If PRF is unavailable at registration, passkey vault envelope is **not** created and existing passkey envelopes are **not** revoked
+- `sanitizeWebAuthnResponseForServer()` removes extension output before every request. Recursive server guards reject `clientExtensionResults.prf`, raw PRF output, and PRF hashes. PRF bytes never leave the browser.
+- The server returns `verifiedCredentialId`, an opaque short-lived binding proof, and at most five encrypted candidates for the verified credential. The browser confirms PRF capability against that ID, extracts PRF by credential ID, and runs vault-core candidate unwrap.
+- `selectedEnvelopeVariantId` and binding `lastUsedAt` are persisted only after `status: "matched"`. `no_match`, test, and failed rebind do not mutate routing state; WebAuthn counter and authenticator backup metadata updates are expected verification-side exceptions.
+- One synced credential may have several active envelope variants and browser bindings. The active variant cap is five and fails closed without eviction. With the vault unlocked, settings can append a compatibility variant to the same credential.
+- New writes require `SELAHKEEP_VAULT_PROFILE.aadContextEnvelope`. Legacy ciphertext with missing/null AAD context is read through vault-core 1.3 while `legacyVaultKeyUnlock` remains enabled; arbitrary explicit contexts fail closed because no legacy string allowlist is configured.
+- If PRF is unavailable, a passkey vault envelope is **not** created and existing variants are **not** revoked
 - PRF diagnostics: `src/lib/passkey/passkey-prf-diagnostics.ts`; audits `docs/archive/PASSKEY_VAULT_UNLOCK_DIAGNOSTIC_AUDIT.md`, `docs/archive/PASSKEY_VAULT_SETUP_AVAILABILITY_AUDIT.md`
 - Availability state: `src/lib/passkey/vault-passkey-availability.ts` — missing account passkey is never reported as browser unsupported; configured envelopes stay read-only in PRF-incompatible browsers
 - Primary UX: `/vault/settings` (not `/vault/recovery`) for enable/test/replace/disable; PRF-unsupported browsers see read-only status and cannot disable/replace without a PRF ceremony proof
-- Vault unlock `returnTo` query param is sanitized (`sanitizeVaultReturnTo`) to internal paths only (`/notes`, `/vault/settings`, `/vault/security`, `/vault/recovery`, `/settings/account`); disabling passkey vault unlock requires DELETE/POST with verified WebAuthn assertion including PRF client extension results
+- Vault unlock `returnTo` query param is sanitized (`sanitizeVaultReturnTo`) to internal paths only (`/notes`, `/vault/settings`, `/vault/security`, `/vault/recovery`, `/settings/account`); disabling vault unlock requires an opaque proof issued after server verification and a browser-local matched variant. PRF extension results are never sent.
 
 All explicit unlock methods promote the recovered User Vault Key through the client vault-session
 boundary. This clears a prior manual-lock flag, restarts inactivity protection, and notifies UI

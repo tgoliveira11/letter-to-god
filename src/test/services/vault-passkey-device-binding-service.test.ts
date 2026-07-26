@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   findByIdForUser: vi.fn(),
   findByIdForUserCredential: vi.fn(),
-  findActivePasskeyEnvelopeByCredentialId: vi.fn(),
+  findActivePasskeyEnvelopeVariants: vi.fn(),
 }));
 
 vi.mock("@/server/repositories/vault-passkey-device-binding-repository", () => ({
@@ -20,7 +20,7 @@ vi.mock("@/server/repositories/passkey-repository", () => ({
 
 vi.mock("@/server/repositories/vault-repository", () => ({
   vaultRepository: {
-    findActivePasskeyEnvelopeByCredentialId: mocks.findActivePasskeyEnvelopeByCredentialId,
+    findActivePasskeyEnvelopeVariants: mocks.findActivePasskeyEnvelopeVariants,
   },
 }));
 
@@ -41,15 +41,14 @@ describe("resolvePasskeyUnlockAvailableOnThisDevice", () => {
     mocks.findByIdForUser.mockResolvedValue({
       id: "binding-1",
       passkeyCredentialId: "cred-db-1",
+      selectedEnvelopeVariantId: "env-1",
     });
     mocks.findByIdForUserCredential.mockResolvedValue({
       id: "cred-db-1",
       credentialId: "webauthn-1",
       vaultUnlockEnabled: true,
     });
-    mocks.findActivePasskeyEnvelopeByCredentialId.mockResolvedValue({
-      encryptedVaultKey: { ciphertext: "x" },
-    });
+    mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue([{ id: "env-1" }]);
 
     const { resolvePasskeyUnlockAvailableOnThisDevice } = await import(
       "@/server/services/vault-passkey-device-binding-service"

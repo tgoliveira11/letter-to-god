@@ -27,9 +27,10 @@ describe("passkey vault unlock PRF ceremony parity", () => {
     expect(browser).toContain("@tgoliveira/vault-core/browser");
   });
 
-  it("pins internal transport for vault unlock credentials on the server", () => {
+  it("preserves stored transports instead of synthesizing internal transport", () => {
     const service = readSource("src/server/services/passkey-service.ts");
-    expect(service).toMatch(/transports: \["internal"\]/);
-    expect(service).toContain("scopeAuthenticationOptionsToDevice");
+    expect(service).toContain("toAllowCredentialDescriptor");
+    expect(service).not.toMatch(/transports: \["internal"\]/);
+    expect(service).not.toContain("scopeAuthenticationOptionsToDevice");
   });
 });

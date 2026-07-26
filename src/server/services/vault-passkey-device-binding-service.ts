@@ -19,18 +19,24 @@ export async function resolvePasskeyUnlockAvailableOnThisDevice(
   const credential = await passkeyRepository.findByIdForUser(binding.passkeyCredentialId, userId);
   if (!credential?.vaultUnlockEnabled) return false;
 
-  const envelope = await vaultRepository.findActivePasskeyEnvelopeByCredentialId(
+  const variants = await vaultRepository.findActivePasskeyEnvelopeVariants(
     userId,
-    credential.credentialId
+    credential.id,
+    credential.credentialId,
+    binding.selectedEnvelopeVariantId
   );
 
-  return Boolean(envelope);
+  return variants.length > 0;
 }
 
 export async function bindVaultPasskeyToThisDevice(
   userId: string,
   passkeyCredentialDbId: string,
-  options: { deviceLabel?: string | null; existingBindingId?: string },
+  options: {
+    deviceLabel?: string | null;
+    existingBindingId?: string;
+    selectedEnvelopeVariantId?: string | null;
+  },
   client?: DbClient
 ): Promise<{ bindingId: string }> {
   return vaultPasskeyDeviceBindingRepository.bindPasskeyToDevice(
@@ -46,4 +52,12 @@ export async function touchVaultPasskeyDeviceBindingLastUsed(
   deviceBindingId: string
 ): Promise<void> {
   await vaultPasskeyDeviceBindingRepository.touchLastUsedAt(deviceBindingId, userId);
+}
+
+/** Removes only this browser's routing binding; credential and envelope variants remain active. */
+export async function unbindVaultPasskeyFromThisDevice(
+  userId: string,
+  deviceBindingId: string
+): Promise<boolean> {
+  return vaultPasskeyDeviceBindingRepository.deleteByIdForUser(deviceBindingId, userId);
 }

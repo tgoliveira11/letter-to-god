@@ -81,10 +81,10 @@ describe("AAD validation policy", () => {
 
   it("validates vault key AAD binds to user id", () => {
     expect(() =>
-      assertVaultKeyAad(USER_ID, encryptedPayload("vault_key", USER_ID))
+      assertVaultKeyAad(USER_ID, encryptedPayload("vault_key", USER_ID), "selahkeep:vault-envelope:v1")
     ).not.toThrow();
     expect(() =>
-      assertVaultKeyAad(USER_ID, encryptedPayload("vault_key", NOTE_ID))
+      assertVaultKeyAad(USER_ID, encryptedPayload("vault_key", NOTE_ID), "selahkeep:vault-envelope:v1")
     ).toThrow(AadValidationError);
   });
 

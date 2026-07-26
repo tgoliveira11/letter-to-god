@@ -14,6 +14,7 @@ import { SuccessState } from "@/components/ui/success-state";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import {
   extractPasskeyPrfOutput,
+  unlockVaultFromPasskeyEnvelopeCandidates,
   wrapVaultKeyForPasskey,
 } from "@/lib/crypto-client/passkey-vault";
 import { apiClient } from "@/lib/api-client/client";
@@ -40,6 +41,12 @@ import {
   PASSKEY_VAULT_REGISTERED_MESSAGE,
   type PasskeySetupOutcome,
 } from "@/lib/passkey/messages";
+import { persistVaultPasskeyBinding } from "@/lib/passkey/vault-unlock-authenticate";
+import {
+  resolvePasskeyPrfCapability,
+  sanitizeWebAuthnResponseForServer,
+} from "@/lib/crypto-client/vault-passkey-browser";
+import type { EncryptedPayload as VaultCoreEncryptedPayload } from "@tgoliveira/vault-core";
 
 interface PasskeySetupProps {
   userId: string;
@@ -108,18 +115,24 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
       const registration = await apiClient.post<{
         verified: boolean;
         credentialId?: string;
+        verifiedCredentialId?: string;
         credentialDbId?: string;
       }>("/api/passkeys/register", {
         action: "verify",
-        response: attestation,
+        response: sanitizeWebAuthnResponseForServer(attestation),
         vaultOnly: true,
         friendlyName: currentDeviceLabel(),
       });
 
       const credentialDbId = registration.credentialDbId;
-      if (!credentialDbId) {
+      if (!credentialDbId || registration.verifiedCredentialId !== attestation.id) {
         throw new Error("Passkey registration failed");
       }
+      resolvePasskeyPrfCapability({
+        ceremony: "registration",
+        credentialId: registration.verifiedCredentialId,
+        clientExtensionResults: attestation.clientExtensionResults as Record<string, unknown>,
+      });
 
       // Step 2: create the envelope from an AUTHENTICATION-ceremony PRF (`get`),
       // matching the unlock ceremony. Registration (`create`) PRF is unreliable on
@@ -143,9 +156,29 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         throw ceremonyError;
       }
 
-      const prfOutput = extractPasskeyPrfOutput(assertion.clientExtensionResults);
+      const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
+      const enrollment = await apiClient.post<{
+        verified: true;
+        verifiedCredentialId: string;
+        enrollmentProof: string;
+      }>(enablePath, {
+        action: "verify",
+        response: sanitizeWebAuthnResponseForServer(assertion),
+      });
+      if (enrollment.verifiedCredentialId !== assertion.id) {
+        throw new Error("Verified passkey credential mismatch.");
+      }
+      const capability = resolvePasskeyPrfCapability({
+        ceremony: "authentication",
+        verifiedCredentialId: enrollment.verifiedCredentialId,
+        clientExtensionResults,
+      });
+      const prfOutput = extractPasskeyPrfOutput(
+        clientExtensionResults,
+        enrollment.verifiedCredentialId
+      );
 
-      if (!prfOutput) {
+      if (capability.state !== "confirmed_authentication" || !prfOutput) {
         showDiagnosticOutcome(resolveCeremonyDiagnosticReason({ prfOutputPresent: false }), {
           attemptedRegistration: true,
         });
@@ -159,15 +192,48 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         userId
       );
 
-      const result = await apiClient.post<{ success?: boolean }>(enablePath, {
-        action: "verify",
-        response: assertion,
+      const result = await apiClient.post<{
+        success?: boolean;
+        verifiedCredentialId: string;
+        envelopeVariantId: string;
+        bindingProof: string;
+      }>(enablePath, {
+        action: "persist",
+        enrollmentProof: enrollment.enrollmentProof,
         encryptedVaultKey,
-        prfVaultEnvelope: true,
         prfSupported: true,
       });
 
       if (result.success) {
+        const match = await unlockVaultFromPasskeyEnvelopeCandidates({
+          userId,
+          verifiedCredentialId: result.verifiedCredentialId,
+          candidates: [{
+            envelopeVariantId: result.envelopeVariantId,
+            credentialId: result.verifiedCredentialId,
+            envelope: {
+              method: "passkey_prf",
+              encryptedVaultKey: encryptedVaultKey as VaultCoreEncryptedPayload,
+              kdfMetadata: null,
+              publicMetadata: {
+                credentialId: result.verifiedCredentialId,
+                prfRequired: true,
+              },
+            },
+          }],
+          prfOutput,
+          applySession: false,
+          cacheInnerKey: false,
+        });
+        if (match.status !== "matched") {
+          throw new Error("The new passkey envelope could not be verified locally.");
+        }
+        await persistVaultPasskeyBinding({
+          bindingProof: result.bindingProof,
+          verifiedCredentialId: result.verifiedCredentialId,
+          selectedEnvelopeVariantId: match.envelopeVariantId,
+          deviceLabel: currentDeviceLabel(),
+        });
         setPasskeyLoginHint({
           userId,
           credentialId: registration.credentialId,

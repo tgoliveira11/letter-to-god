@@ -1,20 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireFullyAuthenticatedUser } from "@/lib/auth/session";
 import { passkeyService } from "@/server/services/passkey-service";
-import { encryptedPayloadSchema } from "@/lib/validation/encrypted-payload";
 import { apiError, parseJsonBody } from "@/lib/api-helpers";
 import { getClientIp } from "@/lib/request-ip";
 import { z } from "zod";
-import {
-  applyVaultDeviceBindingCookie,
-  readVaultDeviceBindingIdFromCookies,
-} from "@/lib/passkey/vault-device-binding-cookie";
+import { rejectPasskeyVaultForbiddenFields } from "@/server/policies/passkey-vault-plaintext-rejection";
 
 const verifySchema = z.object({
   action: z.enum(["options", "verify"]),
   response: z.unknown().optional(),
-  encryptedVaultKey: encryptedPayloadSchema.optional(),
-  prfVaultEnvelope: z.literal(true).optional(),
   vaultOnly: z.literal(true).optional(),
   friendlyName: z.string().max(60).optional(),
 });
@@ -23,6 +17,10 @@ export async function POST(request: Request) {
   try {
     const user = await requireFullyAuthenticatedUser();
     const body = await parseJsonBody(request);
+    const plaintextError = rejectPasskeyVaultForbiddenFields(body);
+    if (plaintextError) {
+      return NextResponse.json({ error: plaintextError }, { status: 400 });
+    }
     const parsed = verifySchema.safeParse(body);
 
     if (!parsed.success) {
@@ -45,25 +43,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing registration response" }, { status: 400 });
     }
 
-    const existingDeviceBindingId = await readVaultDeviceBindingIdFromCookies();
-
     const result = await passkeyService.verifyRegistration(
       user.id,
       parsed.data.response as Parameters<typeof passkeyService.verifyRegistration>[1],
-      parsed.data.encryptedVaultKey,
       {
-        prfVaultEnvelope: parsed.data.prfVaultEnvelope,
         vaultOnly: parsed.data.vaultOnly,
         friendlyName: parsed.data.friendlyName,
-        existingDeviceBindingId,
       }
     );
-
-    const response = NextResponse.json(result);
-    if (result.deviceBindingId) {
-      applyVaultDeviceBindingCookie(response, result.deviceBindingId);
-    }
-    return response;
+    return NextResponse.json(result);
   } catch (error) {
     return apiError(error, "POST /api/passkeys/register");
   }

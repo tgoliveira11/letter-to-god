@@ -90,13 +90,13 @@ Production hides `/api-docs` unless `ENABLE_API_DOCS=true` in `.env.local`.
 
 - **Sign in with passkey** on `/login` — phishing-resistant account authentication; does not require TOTP even when 2FA is enabled
 - **Account settings → Passkeys** — register sign-in passkeys (package)
-- **`/vault/settings` → Passkey vault unlock** — enable, test, replace, or disable vault unlock per account passkey (requires unlocked vault + WebAuthn PRF)
+- **`/vault/settings` → Passkey vault unlock** — enable, test, add a synced-credential compatibility variant, bind/unbind this browser, or disable vault unlock (requires WebAuthn PRF; new variants require an unlocked vault)
 - **`/vault/security`** — vault security review: health summary, protection status, recovery phrase drill (local-only), passkey compatibility, and recent safe vault security events (entry from Vault settings)
 - **`/vault/recovery`** — recovery phrase management; optional link to vault settings for passkey vault unlock
 - **Passkey sign-in** authenticates the account only. Opening the vault is always a separate explicit action from `/vault/unlock` or the vault dock.
 - Details: [`docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md`](docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md)
 
-Run `npm run db:migrate` after pulling passkey account-auth schema updates (`0005_passkey_account_authentication.sql`).
+Run `npm run db:migrate` after pulling schema updates. Vault-core 1.3.0 adoption requires `0021_vault_passkey_multi_device_variants.sql`; see [`docs/VAULT_CORE_1_3_ADOPTION.md`](docs/VAULT_CORE_1_3_ADOPTION.md).
 
 ## Two-factor authentication (optional)
 

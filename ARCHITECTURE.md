@@ -52,7 +52,7 @@ src/
   lib/
     crypto-client/     # Note + version encryption + legacy shims re-exporting src/modules/vault
     voice/             # Pure voice helpers: languages, audio PCM, transcript format, config
-    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@0.2.0)
+    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.3.0)
     api-client/        # HTTP client for API
     validation/        # Shared Zod schemas
     db/                # Drizzle client (server-only)
@@ -68,9 +68,10 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 
 **`/api-docs` layout:** Swagger UI intentionally renders **without** `SiteShell` (`Nav` / `SiteFooter`) so the vendor UI can use the full viewport. The page still includes the global skip link from the root layout and sets `id="main-content"` on its `<main>`. In production the route returns 404 unless `ENABLE_API_DOCS=true` (see `.env.example` and `docs/API_REFERENCE.md`).
 
-- Passkey registration without PRF does **not** create `passkey_authorized_device` envelopes and does **not** revoke existing passkey envelopes
+- Passkey registration never persists a vault envelope. A later authentication ceremony verifies the credential, confirms PRF locally, and appends one encrypted variant; existing variants are never replaced implicitly.
 - **Account passkeys and vault passkeys are independent** — vault-only setup uses `POST /api/passkeys/register` with `vaultOnly: true` (`signInEnabled: false`, `authenticatorAttachment: "platform"`); account passkey sign-in never unlocks the vault
-- Vault unlock authenticate: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` — server `allowCredentials` lists only `vaultUnlockEnabled` credentials and replays stored `transports`; client helper `src/lib/passkey/vault-unlock-authenticate.ts` preserves transport hints when filtering (see `docs/archive/PASSKEY_TOUCH_ID_QR_PROMPT_FIX.md`, `docs/archive/PASSKEY_VAULT_LIFECYCLE.md`)
+- Vault unlock authenticate: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` — missing binding uses the explicit active allow-list; a stale binding fails closed. Stored transports are preserved. Verification returns at most five encrypted variants for the verified credential; only a local candidate match may persist `selectedEnvelopeVariantId`.
+- `vault_envelopes.passkey_credential_id` identifies the logical credential; `vault_passkey_device_bindings` is many-to-one and its composite FK ensures the selected variant belongs to that credential. Migration `0021` preserves legacy ciphertext/AAD/IDs byte-for-byte.
 - Passkey-based vault unlock requires PRF support. If PRF is unavailable, the app must not create a passkey vault envelope and must not present that passkey as a recovery method.
 - WebAuthn challenge validation uses atomic `consumeValidChallenge()` only (`findValidChallenge` removed)
 - WebAuthn challenge indexes: `idx_webauthn_challenges_lookup`, `idx_webauthn_challenges_expires_at`

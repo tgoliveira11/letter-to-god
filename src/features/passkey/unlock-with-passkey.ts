@@ -1,4 +1,3 @@
-import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
 import {
   getPasskeyPrfDiagnosticMessage,
   resolveCeremonyDiagnosticReason,
@@ -14,10 +13,9 @@ import {
 } from "@/lib/passkey/messages";
 import {
   extractPasskeyPrfOutput,
-  PasskeyPrfRequiredError,
-  PasskeyUnlockError,
-  unlockVaultFromPasskeyEnvelope,
+  unlockVaultFromPasskeyEnvelopeCandidates,
 } from "@/lib/crypto-client/passkey-vault";
+import { resolvePasskeyPrfCapability } from "@/lib/crypto-client/vault-passkey-browser";
 import { isAppleMobileBelowPrfMinimum, isAppleMobileUserAgent } from "@/lib/passkey/prf-support";
 import { resolveActiveVaultUnlockCredentialId } from "@/lib/passkey/vault-unlock-credential";
 import { logPasskeyVaultEvent } from "@/features/passkey/passkey-vault-audit";
@@ -25,14 +23,10 @@ import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/brow
 import {
   runVaultUnlockAuthenticationCeremony,
   runVaultUnlockAuthenticationCeremonyWithOptions,
+  persistVaultPasskeyBinding,
   verifyVaultUnlockAuthentication,
 } from "@/lib/passkey/vault-unlock-authenticate";
-
-interface PasskeyAuthResult {
-  verified: boolean;
-  encryptedVaultKey: EncryptedPayload | null;
-  prfRequired?: boolean;
-}
+import { currentDeviceLabel } from "@/lib/passkey/device-label";
 
 export async function unlockVaultWithPasskey(
   userId: string,
@@ -61,11 +55,10 @@ export async function unlockVaultWithPasskey(
     throw error;
   }
 
-  const prfOutput = extractPasskeyPrfOutput(assertion.clientExtensionResults, assertion.id);
-
-  let result: PasskeyAuthResult;
+  const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
+  let result;
   try {
-    result = (await verifyVaultUnlockAuthentication(assertion)) as PasskeyAuthResult;
+    result = await verifyVaultUnlockAuthentication(assertion);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes(PASSKEY_VAULT_UNLOCK_NOT_CONFIGURED_MESSAGE)) {
@@ -80,12 +73,20 @@ export async function unlockVaultWithPasskey(
     throw error;
   }
 
-  if (!result.verified || !result.encryptedVaultKey) {
+  if (!result.verified || result.verifiedCredentialId !== assertion.id) {
     throw new Error(PASSKEY_NOT_LINKED_TO_VAULT_UNLOCK_MESSAGE);
   }
 
-  const prfRequired = result.prfRequired ?? true;
-  if (prfRequired && !prfOutput) {
+  const capability = resolvePasskeyPrfCapability({
+    ceremony: "authentication",
+    verifiedCredentialId: result.verifiedCredentialId,
+    clientExtensionResults,
+  });
+  const prfOutput = extractPasskeyPrfOutput(
+    clientExtensionResults,
+    result.verifiedCredentialId
+  );
+  if (capability.state !== "confirmed_authentication" || !prfOutput) {
     logPasskeyVaultEvent("passkey_vault_unlock_failed", {
       method: "passkey",
       errorCode: "prf_required",
@@ -98,32 +99,44 @@ export async function unlockVaultWithPasskey(
   }
 
   try {
-    const vaultKey = await unlockVaultFromPasskeyEnvelope(
+    const unlockResult = await unlockVaultFromPasskeyEnvelopeCandidates({
       userId,
-      result.encryptedVaultKey,
+      verifiedCredentialId: result.verifiedCredentialId,
+      candidates: result.candidates,
       prfOutput,
-      { prfRequired }
-    );
+    });
+    if (unlockResult.status !== "matched") {
+      if (unlockResult.status === "prf_unavailable") {
+        throw new Error(
+          getPasskeyPrfDiagnosticMessage(
+            resolveCeremonyDiagnosticReason({ prfOutputPresent: false })
+          )
+        );
+      }
+      if (unlockResult.status === "no_match") {
+        throw new Error(resolvePasskeyVaultDecryptFailureMessage());
+      }
+      throw new Error(PASSKEY_NOT_LINKED_TO_VAULT_UNLOCK_MESSAGE);
+    }
+
+    try {
+      await persistVaultPasskeyBinding({
+        bindingProof: result.bindingProof,
+        verifiedCredentialId: result.verifiedCredentialId,
+        selectedEnvelopeVariantId: unlockResult.envelopeVariantId,
+        deviceLabel: currentDeviceLabel(),
+      });
+    } catch {
+      // The verified local unlock remains valid. Binding is routing-only and can be retried.
+    }
     logPasskeyVaultEvent("passkey_vault_unlock_succeeded", { method: "passkey" });
-    return vaultKey;
+    return unlockResult.vaultKey;
   } catch (error) {
     logPasskeyVaultEvent("passkey_vault_unlock_failed", {
       method: "passkey",
       errorCode:
-        error instanceof Error && error.name === "PasskeyPrfRequiredError"
-          ? "prf_required"
-          : "unwrap_failed",
+        error instanceof Error && error.message.includes("PRF") ? "prf_required" : "unwrap_failed",
     });
-    if (error instanceof PasskeyPrfRequiredError) {
-      throw new Error(
-        getPasskeyPrfDiagnosticMessage(
-          resolveCeremonyDiagnosticReason({ prfOutputPresent: false })
-        )
-      );
-    }
-    if (error instanceof PasskeyUnlockError) {
-      throw new Error(mapPasskeyCryptoError(error) ?? resolvePasskeyVaultDecryptFailureMessage());
-    }
     throw new Error(mapPasskeyCryptoError(error) ?? resolvePasskeyVaultDecryptFailureMessage());
   }
 }

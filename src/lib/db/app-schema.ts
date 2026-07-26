@@ -8,6 +8,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  foreignKey,
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -27,31 +28,13 @@ export const passkeyCredentials = pgTable("passkey_credentials", {
   signInEnabled: boolean("sign_in_enabled").notNull().default(true),
   vaultUnlockEnabled: boolean("vault_unlock_enabled").notNull().default(false),
   prfSupported: boolean("prf_supported"),
+  credentialDeviceType: text("credential_device_type"),
+  backupEligible: boolean("backup_eligible"),
+  credentialBackedUp: boolean("credential_backed_up"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
 });
-
-/** HttpOnly cookie `selahkeep_vault_device` stores `id`; links browser to one vault passkey credential. */
-export const vaultPasskeyDeviceBindings = pgTable(
-  "vault_passkey_device_bindings",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    passkeyCredentialId: uuid("passkey_credential_id")
-      .notNull()
-      .references(() => passkeyCredentials.id, { onDelete: "cascade" }),
-    deviceLabel: text("device_label"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-  },
-  (table) => [
-    uniqueIndex("idx_vault_passkey_device_bindings_credential").on(table.passkeyCredentialId),
-    index("idx_vault_passkey_device_bindings_user_id").on(table.userId),
-  ]
-);
 
 export const userVaults = pgTable("user_vaults", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -72,6 +55,10 @@ export const vaultEnvelopes = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** Explicit relation for passkey envelope variants; legacy rows are backfilled additively. */
+    passkeyCredentialId: uuid("passkey_credential_id").references(() => passkeyCredentials.id, {
+      onDelete: "set null",
+    }),
     method: text("method").notNull(),
     encryptedVaultKey: jsonb("encrypted_vault_key").notNull(),
     kdfMetadata: jsonb("kdf_metadata"),
@@ -79,7 +66,48 @@ export const vaultEnvelopes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
-  (table) => [index("idx_vault_envelopes_user_id_method").on(table.userId, table.method)]
+  (table) => [
+    index("idx_vault_envelopes_user_id_method").on(table.userId, table.method),
+    index("idx_vault_envelopes_passkey_credential").on(table.passkeyCredentialId),
+    uniqueIndex("uq_vault_envelopes_id_passkey_credential").on(
+      table.id,
+      table.passkeyCredentialId
+    ),
+  ]
+);
+
+/**
+ * HttpOnly cookie `selahkeep_vault_device` stores `id`. A logical credential can have
+ * several browser bindings; `selectedEnvelopeVariantId` is only routing state persisted
+ * after a local candidate unwrap succeeds.
+ */
+export const vaultPasskeyDeviceBindings = pgTable(
+  "vault_passkey_device_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    passkeyCredentialId: uuid("passkey_credential_id")
+      .notNull()
+      .references(() => passkeyCredentials.id, { onDelete: "cascade" }),
+    selectedEnvelopeVariantId: uuid("selected_envelope_variant_id"),
+    deviceLabel: text("device_label"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_vault_passkey_device_bindings_credential").on(table.passkeyCredentialId),
+    index("idx_vault_passkey_device_bindings_user_id").on(table.userId),
+    index("idx_vault_passkey_device_bindings_selected_variant").on(
+      table.selectedEnvelopeVariantId
+    ),
+    foreignKey({
+      name: "vault_passkey_binding_selected_variant_credential_fk",
+      columns: [table.selectedEnvelopeVariantId, table.passkeyCredentialId],
+      foreignColumns: [vaultEnvelopes.id, vaultEnvelopes.passkeyCredentialId],
+    }),
+  ]
 );
 
 export const notes = pgTable(

@@ -22,7 +22,7 @@ Product-owned vault layer. Account authentication (`@tgoliveira/secure-auth`) an
 ## Dependency
 
 ```json
-"@tgoliveira/vault-core": "^0.2.0"
+"@tgoliveira/vault-core": "^1.3.0"
 ```
 
 Note encryption (title/body/metadata) remains in `src/lib/crypto-client/` — product-specific AAD fields beyond vault-core `VaultAadField`.
@@ -35,4 +35,5 @@ Note encryption (title/body/metadata) remains in `src/lib/crypto-client/` — pr
 ## Legacy compatibility
 
 - PRF salt prefix: `letters-passkey-prf-v1:` (unchanged)
-- Pre-vault-core envelopes omit AAD `context`; vault-core decrypt tries legacy byte order variants
+- New vault-key envelopes require the exact canonical SelahKeep context. The 1.3 router temporarily accepts legacy missing/null context; arbitrary explicit legacy strings are not allowlisted.
+- PRF output never leaves the browser. Candidate unwrap and `selectedEnvelopeVariantId` selection happen locally.

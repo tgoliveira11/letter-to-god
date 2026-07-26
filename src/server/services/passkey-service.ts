@@ -16,11 +16,9 @@ import { vaultRepository } from "@/server/repositories/vault-repository";
 import { auditRepository } from "@/server/repositories/audit-repository";
 import {
   resolvePasskeyUnlockAvailableOnThisDevice,
-  touchVaultPasskeyDeviceBindingLastUsed,
 } from "@/server/services/vault-passkey-device-binding-service";
 import { enforceRateLimit, RateLimitError } from "@/server/policies/rate-limit";
 import { passkeyPrfExtensions } from "@/lib/passkey/prf";
-import { scopeAuthenticationOptionsToDevice } from "@tgoliveira/vault-core";
 import {
   toAllowCredentialDescriptor,
   persistRegistrationTransports,
@@ -37,8 +35,6 @@ import {
   getWebAuthnRpName,
   toPasskeyVerificationErrorMessage,
 } from "@/lib/passkey/webauthn-config";
-import { assertVaultKeyAad } from "@/server/policies/aad-validation";
-import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
 
 const rpName = getWebAuthnRpName();
 const rpID = getWebAuthnRpId();
@@ -49,6 +45,7 @@ export type PasskeyAuthenticatePurpose = "vault_unlock";
 type PasskeyAuthenticationOptions = {
   purpose?: PasskeyAuthenticatePurpose;
   deviceBindingId?: string;
+  credentialId?: string;
 };
 
 type PasskeyRegistrationOptions = {
@@ -76,43 +73,53 @@ export function vaultPasskeyUserHandle(): Uint8Array<ArrayBuffer> {
  */
 async function buildVaultUnlockAuthenticationOptions(
   userId?: string,
-  deviceBindingId?: string
+  deviceBindingId?: string,
+  requestedCredentialId?: string
 ) {
   if (!userId) {
     throw new ChallengeError(PASSKEY_VAULT_UNLOCK_NOT_CONFIGURED_MESSAGE);
   }
 
   const envelopes = await vaultRepository.findActiveEnvelopesByUserId(userId);
-  const envelopeCredentialIds = new Set(
-    envelopes
-      .filter((envelope) => envelope.method === "passkey_authorized_device")
-      .map((envelope) => (envelope.publicMetadata as { credentialId?: string } | null)?.credentialId)
-      .filter((credentialId): credentialId is string => Boolean(credentialId))
+  const activePasskeyEnvelopes = envelopes.filter(
+    (envelope) => envelope.method === "passkey_authorized_device"
   );
-
-  if (envelopeCredentialIds.size === 0) {
+  if (activePasskeyEnvelopes.length === 0) {
     throw new ChallengeError(PASSKEY_VAULT_UNLOCK_NOT_CONFIGURED_MESSAGE);
   }
 
   const credentials = await passkeyRepository.findByUserId(userId);
   let activeCredentials = credentials.filter(
-    (credential) =>
-      credential.vaultUnlockEnabled && envelopeCredentialIds.has(credential.credentialId)
+    (credential) => credential.vaultUnlockEnabled && activePasskeyEnvelopes.some((envelope) => {
+      if (envelope.passkeyCredentialId === credential.id) return true;
+      const metadata = envelope.publicMetadata as { credentialId?: string } | null;
+      return envelope.passkeyCredentialId == null && metadata?.credentialId === credential.credentialId;
+    })
   );
 
-  if (deviceBindingId) {
+  if (requestedCredentialId) {
+    const requestedCredential = activeCredentials.find(
+      (credential) => credential.credentialId === requestedCredentialId
+    );
+    if (!requestedCredential) {
+      throw new ChallengeError(PASSKEY_NOT_LINKED_TO_VAULT_UNLOCK_MESSAGE);
+    }
+    activeCredentials = [requestedCredential];
+  } else if (deviceBindingId) {
     const binding = await vaultPasskeyDeviceBindingRepository.findByIdForUser(
       deviceBindingId,
       userId
     );
-    if (binding) {
-      const boundCredential = activeCredentials.find(
-        (credential) => credential.id === binding.passkeyCredentialId
-      );
-      if (boundCredential) {
-        activeCredentials = [boundCredential];
-      }
+    if (!binding) {
+      throw new StaleVaultDeviceBindingError();
     }
+    const boundCredential = activeCredentials.find(
+      (credential) => credential.id === binding.passkeyCredentialId
+    );
+    if (!boundCredential) {
+      throw new StaleVaultDeviceBindingError();
+    }
+    activeCredentials = [boundCredential];
   }
 
   if (activeCredentials.length === 0) {
@@ -121,23 +128,12 @@ async function buildVaultUnlockAuthenticationOptions(
 
   const options = await generateAuthenticationOptions({
     rpID,
-    allowCredentials: activeCredentials.map((credential) => ({
-      id: credential.credentialId,
-      transports: ["internal"] as const,
-    })),
+    allowCredentials: activeCredentials.map((credential) =>
+      toAllowCredentialDescriptor(credential)
+    ),
     userVerification: "required",
     extensions: passkeyPrfExtensions(userId),
   });
-
-  const scopedOptions =
-    activeCredentials.length === 1
-      ? scopeAuthenticationOptionsToDevice(
-          options as unknown as Parameters<typeof scopeAuthenticationOptionsToDevice>[0],
-          {
-            credentialId: activeCredentials[0]!.credentialId,
-          }
-        )
-      : options;
 
   await passkeyRepository.storeChallenge({
     userId,
@@ -146,7 +142,7 @@ async function buildVaultUnlockAuthenticationOptions(
     expiresAt: new Date(Date.now() + 5 * 60 * 1000),
   });
 
-  return scopedOptions;
+  return options;
 }
 
 export const passkeyService = {
@@ -204,12 +200,9 @@ export const passkeyService = {
   async verifyRegistration(
     userId: string,
     response: RegistrationResponseJSON,
-    encryptedVaultKey?: EncryptedPayload,
     options?: {
-      prfVaultEnvelope?: boolean;
       vaultOnly?: boolean;
       friendlyName?: string;
-      existingDeviceBindingId?: string;
     }
   ) {
     const clientData = JSON.parse(
@@ -241,17 +234,6 @@ export const passkeyService = {
     const { credential, credentialDeviceType, credentialBackedUp } =
       verification.registrationInfo;
 
-    const wantsVaultEnvelope = Boolean(encryptedVaultKey);
-    if (wantsVaultEnvelope && !options?.prfVaultEnvelope) {
-      throw new ChallengeError(
-        "Passkey vault unlock requires PRF support. Use your vault password or recovery phrase."
-      );
-    }
-
-    if (encryptedVaultKey) {
-      assertVaultKeyAad(userId, encryptedVaultKey);
-    }
-
     // Vault-only passkeys may register WITHOUT an envelope: the canonical flow
     // registers the credential first, then creates the envelope from an
     // authentication-ceremony PRF (POST /api/account/passkeys/:id/enable-vault-unlock),
@@ -260,7 +242,6 @@ export const passkeyService = {
     const vaultOnly = Boolean(options?.vaultOnly);
 
     let createdCredentialDbId = "";
-    let deviceBindingId: string | undefined;
     await runInTransaction(async (tx) => {
       const createdCredential = await passkeyRepository.createCredential(
         {
@@ -275,35 +256,15 @@ export const passkeyService = {
               : "Vault passkey"
             : null,
           signInEnabled: vaultOnly ? false : true,
-          vaultUnlockEnabled: Boolean(encryptedVaultKey && options?.prfVaultEnvelope),
-          prfSupported: encryptedVaultKey && options?.prfVaultEnvelope ? true : null,
+          vaultUnlockEnabled: false,
+          prfSupported: null,
+          credentialDeviceType,
+          backupEligible: credentialDeviceType === "multiDevice",
+          credentialBackedUp,
         },
         tx
       );
       createdCredentialDbId = createdCredential.id;
-
-      if (encryptedVaultKey && options?.prfVaultEnvelope) {
-        await vaultRepository.createEnvelope(
-          {
-            userId,
-            method: "passkey_authorized_device",
-            encryptedVaultKey,
-            publicMetadata: { credentialId: credential.id, prfRequired: true },
-          },
-          tx
-        );
-
-        const binding = await vaultPasskeyDeviceBindingRepository.bindPasskeyToDevice(
-          userId,
-          createdCredential.id,
-          {
-            deviceLabel: options?.friendlyName ?? createdCredential.friendlyName,
-            existingBindingId: options?.existingDeviceBindingId,
-          },
-          tx
-        );
-        deviceBindingId = binding.bindingId;
-      }
 
       await auditRepository.record("passkey_added", userId, undefined, tx);
     });
@@ -311,10 +272,10 @@ export const passkeyService = {
     return {
       verified: true,
       credentialId: credential.id,
+      verifiedCredentialId: credential.id,
       credentialDbId: createdCredentialDbId,
       deviceType: credentialDeviceType,
       backedUp: credentialBackedUp,
-      deviceBindingId,
     };
   },
 
@@ -332,12 +293,14 @@ export const passkeyService = {
 
     const purpose = authOptions?.purpose;
 
-    // Vault unlock follows the vault-core canonical contract: scope the ceremony to
-    // the single credential bound to the active passkey envelope, request PRF `eval`
-    // (never evalByCredential), and pin `internal` transport. This keeps the PRF
-    // output identical to setup/enable and avoids iOS hybrid routing.
+    // A valid browser binding selects one exact credential. Missing/stale bindings use
+    // the explicit server allow-list; stored transports are preserved and never guessed.
     if (purpose === "vault_unlock") {
-      return buildVaultUnlockAuthenticationOptions(userId, authOptions?.deviceBindingId);
+      return buildVaultUnlockAuthenticationOptions(
+        userId,
+        authOptions?.deviceBindingId,
+        authOptions?.credentialId
+      );
     }
 
     const credentials = userId ? await passkeyRepository.findByUserId(userId) : [];
@@ -423,6 +386,12 @@ export const passkeyService = {
 
     await passkeyRepository.updateLastUsedAt(credential.credentialId);
 
+    await passkeyRepository.updateCredentialFlags(credential.id, userId, {
+      credentialDeviceType: verification.authenticationInfo.credentialDeviceType,
+      backupEligible: verification.authenticationInfo.credentialDeviceType === "multiDevice",
+      credentialBackedUp: verification.authenticationInfo.credentialBackedUp,
+    });
+
     const purpose = authOptions?.purpose;
 
     if (purpose === "vault_unlock") {
@@ -431,41 +400,116 @@ export const passkeyService = {
         throw new ChallengeError(PASSKEY_ACCOUNT_ONLY_FOR_SIGN_IN_MESSAGE);
       }
 
-      const envelope = await vaultRepository.findActivePasskeyEnvelopeByCredentialId(
+      const binding = authOptions?.deviceBindingId
+        ? await vaultPasskeyDeviceBindingRepository.findByIdForUser(
+            authOptions.deviceBindingId,
+            userId
+          )
+        : null;
+      const selectedEnvelopeVariantId =
+        binding && binding.passkeyCredentialId === credential.id
+          ? binding.selectedEnvelopeVariantId
+          : null;
+      const variants = await vaultRepository.findActivePasskeyEnvelopeVariants(
         userId,
-        credential.credentialId
+        credential.id,
+        credential.credentialId,
+        selectedEnvelopeVariantId
       );
 
-      if (!envelope?.encryptedVaultKey) {
+      if (variants.length === 0) {
         await auditRepository.record("failed_unlock_attempt", userId, { method: "passkey" });
         throw new ChallengeError(PASSKEY_NOT_LINKED_TO_VAULT_UNLOCK_MESSAGE);
       }
 
-      if (authOptions?.deviceBindingId) {
-        await touchVaultPasskeyDeviceBindingLastUsed(userId, authOptions.deviceBindingId);
+      if (variants.length > 5) {
+        throw new ChallengeError(
+          "This passkey has too many active envelope variants. Use vault recovery to review them safely."
+        );
       }
+
+      const bindingProof = randomBytes(32).toString("base64url");
+      await passkeyRepository.storeChallenge({
+        userId,
+        challenge: bindingProof,
+        type: `vault-binding:${credential.id}`,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      });
 
       return {
         verified: true,
-        encryptedVaultKey: envelope.encryptedVaultKey,
-        prfRequired:
-          (envelope.publicMetadata as { prfRequired?: boolean } | null)?.prfRequired ?? true,
+        verifiedCredentialId: credential.credentialId,
+        bindingProof,
+        candidates: variants.map((variant) => ({
+          envelopeVariantId: variant.id,
+          credentialId: credential.credentialId,
+          envelope: {
+            method: "passkey_prf" as const,
+            encryptedVaultKey: variant.encryptedVaultKey,
+            kdfMetadata: null,
+            ...(variant.publicMetadata
+              ? { publicMetadata: variant.publicMetadata as Record<string, unknown> }
+              : {}),
+          },
+        })),
       };
     }
 
-    const envelope = credential.vaultUnlockEnabled
-      ? await vaultRepository.findActivePasskeyEnvelopeByCredentialId(
-          userId,
-          credential.credentialId
-        )
-      : null;
+    // Account authentication and vault unlock are separate domains. Only the explicit
+    // vault_unlock purpose returns encrypted candidate envelopes.
+    return { verified: true };
+  },
 
-    return {
-      verified: true,
-      encryptedVaultKey: envelope?.encryptedVaultKey ?? null,
-      prfRequired:
-        (envelope?.publicMetadata as { prfRequired?: boolean } | null)?.prfRequired ?? true,
-    };
+  async bindVerifiedCredentialToDevice(
+    userId: string,
+    input: {
+      bindingProof: string;
+      verifiedCredentialId: string;
+      selectedEnvelopeVariantId: string;
+      existingDeviceBindingId?: string;
+      deviceLabel?: string | null;
+    }
+  ) {
+    const credential = await passkeyRepository.findByCredentialId(input.verifiedCredentialId);
+    if (!credential || credential.userId !== userId || !credential.vaultUnlockEnabled) {
+      throw new NotFoundError(PASSKEY_NOT_LINKED_TO_VAULT_UNLOCK_MESSAGE);
+    }
+
+    try {
+      await passkeyRepository.consumeValidChallenge(
+        input.bindingProof,
+        `vault-binding:${credential.id}`,
+        userId
+      );
+    } catch {
+      throw new ChallengeError("Passkey binding proof is invalid or expired.");
+    }
+
+    return runInTransaction(async (tx) => {
+      await passkeyRepository.lockForVaultMutation(credential.id, userId, tx);
+      const variant = await vaultRepository.findActivePasskeyEnvelopeVariant(
+        userId,
+        credential.id,
+        credential.credentialId,
+        input.selectedEnvelopeVariantId,
+        tx
+      );
+      if (!variant) {
+        throw new ChallengeError(
+          "Selected passkey envelope variant is not active for this credential."
+        );
+      }
+      return vaultPasskeyDeviceBindingRepository.bindPasskeyToDevice(
+        userId,
+        credential.id,
+        {
+          existingBindingId: input.existingDeviceBindingId,
+          selectedEnvelopeVariantId: variant.id,
+          deviceLabel: input.deviceLabel,
+        },
+        tx
+      );
+    });
   },
 
   async listVaultUnlockCredentials(userId: string, deviceBindingId?: string) {
@@ -486,6 +530,27 @@ export const passkeyService = {
       userId,
       deviceBindingId
     );
+    const passkeysWithVariants = await Promise.all(
+      vaultCredentials.map(async (credential) => {
+        const variants = await vaultRepository.findActivePasskeyEnvelopeVariants(
+          userId,
+          credential.id,
+          credential.credentialId
+        );
+        return {
+          id: credential.id,
+          friendlyName: credential.friendlyName ?? "Vault passkey",
+          signInEnabled: credential.signInEnabled,
+          vaultUnlockEnabled: credential.vaultUnlockEnabled,
+          prfSupported: credential.prfSupported,
+          credentialId: credential.credentialId,
+          credentialDeviceType: credential.credentialDeviceType,
+          backupEligible: credential.backupEligible,
+          credentialBackedUp: credential.credentialBackedUp,
+          activeEnvelopeVariantCount: variants.length,
+        };
+      })
+    );
 
     if (vaultCredentials.length === 0 && envelope) {
       return {
@@ -496,6 +561,10 @@ export const passkeyService = {
           vaultUnlockEnabled: boolean;
           prfSupported: boolean | null;
           credentialId: string;
+          credentialDeviceType: string | null;
+          backupEligible: boolean | null;
+          credentialBackedUp: boolean | null;
+          activeEnvelopeVariantCount: number;
         }>,
         deviceBindings: deviceBindings.map((binding) => ({
           id: binding.id,
@@ -503,6 +572,7 @@ export const passkeyService = {
           deviceLabel: binding.deviceLabel ?? binding.friendlyName ?? "Vault passkey",
           createdAt: binding.createdAt.toISOString(),
           lastUsedAt: binding.lastUsedAt?.toISOString() ?? null,
+          selectedEnvelopeVariantId: binding.selectedEnvelopeVariantId,
           isCurrentDevice: binding.id === deviceBindingId,
         })),
         currentDeviceCredentialId,
@@ -512,20 +582,14 @@ export const passkeyService = {
     }
 
     return {
-      passkeys: vaultCredentials.map((credential) => ({
-        id: credential.id,
-        friendlyName: credential.friendlyName ?? "Vault passkey",
-        signInEnabled: credential.signInEnabled,
-        vaultUnlockEnabled: credential.vaultUnlockEnabled,
-        prfSupported: credential.prfSupported,
-        credentialId: credential.credentialId,
-      })),
+      passkeys: passkeysWithVariants,
       deviceBindings: deviceBindings.map((binding) => ({
         id: binding.id,
         credentialId: binding.credentialId,
         deviceLabel: binding.deviceLabel ?? binding.friendlyName ?? "Vault passkey",
         createdAt: binding.createdAt.toISOString(),
         lastUsedAt: binding.lastUsedAt?.toISOString() ?? null,
+        selectedEnvelopeVariantId: binding.selectedEnvelopeVariantId,
         isCurrentDevice: binding.id === deviceBindingId,
       })),
       currentDeviceCredentialId,
@@ -546,6 +610,9 @@ export const passkeyService = {
     }
 
     await runInTransaction(async (tx) => {
+      for (const credential of credentials) {
+        await passkeyRepository.lockForVaultMutation(credential.id, userId, tx);
+      }
       await passkeyRepository.revokeAllByUserId(userId, tx);
 
       await vaultPasskeyDeviceBindingRepository.deleteAllByUserId(userId, tx);
@@ -575,6 +642,13 @@ export class ChallengeError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ChallengeError";
+  }
+}
+
+export class StaleVaultDeviceBindingError extends Error {
+  constructor() {
+    super("This browser's vault passkey binding is stale. Choose and verify a passkey again.");
+    this.name = "StaleVaultDeviceBindingError";
   }
 }
 

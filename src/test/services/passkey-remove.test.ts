@@ -5,6 +5,7 @@ import { USER_ID } from "@/test/helpers/fixtures";
 const mocks = vi.hoisted(() => ({
   findByUserId: vi.fn(),
   revokeAllByUserId: vi.fn(),
+  lockForVaultMutation: vi.fn(),
   findActiveEnvelopeByMethod: vi.fn(),
   findActiveEnvelopesByUserId: vi.fn(),
   revokeEnvelope: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("@/server/repositories/passkey-repository", () => ({
   passkeyRepository: {
     findByUserId: mocks.findByUserId,
     revokeAllByUserId: mocks.revokeAllByUserId,
+    lockForVaultMutation: mocks.lockForVaultMutation,
   },
 }));
 
