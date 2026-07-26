@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { SuccessState } from "@/components/ui/success-state";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { apiClient } from "@/lib/api-client/client";
+import { passkeysApi } from "@/lib/api-client/passkeys";
 import { vaultApi } from "@/lib/api-client/vault";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import {
@@ -146,6 +148,7 @@ export function PasskeyVaultUnlockSetup({
   const [serverPasskeyEnvelope, setServerPasskeyEnvelope] = useState(false);
   const [environment, setEnvironment] = useState<PasskeyPrfEnvironmentSnapshot | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [removeAllOpen, setRemoveAllOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [diagnosticReason, setDiagnosticReason] = useState<PasskeyPrfDiagnosticReason | null>(null);
@@ -592,6 +595,29 @@ export function PasskeyVaultUnlockSetup({
     }
   }
 
+  async function handleRemoveAllVaultPasskeys() {
+    setLoadingId("remove-all");
+    setError(null);
+    setMessage(null);
+    setDiagnosticReason(null);
+
+    try {
+      if (!getSessionVaultKey()) {
+        throw new Error("Unlock your vault before removing all vault passkeys.");
+      }
+      await passkeysApi.removeAllVaultUnlock();
+      setMessage(
+        "Passkey vault unlock was removed from every passkey and browser. Account sign-in passkeys were preserved."
+      );
+      await loadPasskeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove all vault passkeys.");
+    } finally {
+      setLoadingId(null);
+      setRemoveAllOpen(false);
+    }
+  }
+
   const alertVariant =
     availabilityCopy?.variant === "success"
       ? "success"
@@ -738,6 +764,27 @@ export function PasskeyVaultUnlockSetup({
         </div>
       )}
 
+      {(hasVaultPasskey || serverPasskeyEnvelope) && vaultUnlocked && (
+        <div className="space-y-3 border-t border-[var(--border)] pt-4">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-[var(--foreground)]">
+              Remove passkey vault unlock everywhere
+            </p>
+            <p className="text-sm leading-relaxed text-[var(--muted)]">
+              Removes every vault-only passkey, vault envelope variant, and browser binding. A
+              passkey that is also used to sign in to your account will keep its sign-in access.
+            </p>
+          </div>
+          <Button
+            variant="danger"
+            disabled={loadingId !== null}
+            onClick={() => setRemoveAllOpen(true)}
+          >
+            Remove all vault passkeys
+          </Button>
+        </div>
+      )}
+
       {passkeys.length === 0 && serverPasskeyEnvelope && !passkeyConfiguredOnAnotherDevice && (
         <p className="text-sm text-[var(--muted)]">
           A passkey vault unlock envelope exists on your account. Use a PRF-compatible browser where
@@ -755,6 +802,16 @@ export function PasskeyVaultUnlockSetup({
           {error}
         </Alert>
       )}
+
+      <ConfirmDialog
+        open={removeAllOpen}
+        title="Remove all vault passkeys?"
+        description="You will no longer be able to unlock the vault with any passkey on any browser. Your vault password, recovery phrase, and account sign-in passkeys will not be changed."
+        confirmLabel="Remove all vault passkeys"
+        loading={loadingId === "remove-all"}
+        onConfirm={handleRemoveAllVaultPasskeys}
+        onCancel={() => setRemoveAllOpen(false)}
+      />
     </div>
   );
 }

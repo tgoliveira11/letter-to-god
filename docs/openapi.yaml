@@ -1144,10 +1144,27 @@ paths:
       responses:
         '200':
           description: Browser binding removed and cookie cleared
+  /api/passkeys/vault-unlock:
+    get:
+      tags: [Passkeys]
+      summary: List active vault passkey credentials, envelope state, and browser bindings
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Vault passkey and binding status; no PRF output
+    delete:
+      tags: [Passkeys]
+      summary: Remove every vault passkey capability, envelope, and binding while preserving account sign-in passkeys
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Vault passkeys removed and browser binding cookie cleared
   /api/passkeys:
     delete:
       tags: [Passkeys]
-      summary: Remove all passkeys and passkey vault envelope
+      summary: Legacy alias for scoped bulk vault-passkey removal; account sign-in passkeys are preserved
       security:
         - sessionCookie: []
       responses:

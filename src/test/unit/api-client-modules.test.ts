@@ -65,8 +65,15 @@ describe("typed API client modules", () => {
             { status: 200 }
           );
         }
-        if (url === "/api/passkeys" && init?.method === "DELETE") {
-          return new Response(JSON.stringify({ success: true }), { status: 200 });
+        if (url === "/api/passkeys/vault-unlock" && init?.method === "DELETE") {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              removedVaultPasskeyCount: 2,
+              preservedSignInPasskeyCount: 1,
+            }),
+            { status: 200 }
+          );
         }
         if (url === `/api/notes/${NOTE_ID}/versions` && init?.method === "POST") {
           return new Response(JSON.stringify({ id: VERSION_ID, versionNumber: 1 }), { status: 201 });
@@ -161,8 +168,12 @@ describe("typed API client modules", () => {
     await expect(vaultApi.unlockWithRecoveryCode()).resolves.toHaveProperty("encryptedVaultKey");
   });
 
-  it("passkeysApi covers removeAll", async () => {
-    await expect(passkeysApi.removeAll()).resolves.toEqual({ success: true });
+  it("passkeysApi covers scoped vault-passkey removal", async () => {
+    await expect(passkeysApi.removeAllVaultUnlock()).resolves.toEqual({
+      success: true,
+      removedVaultPasskeyCount: 2,
+      preservedSignInPasskeyCount: 1,
+    });
   });
 
   it("noteVersionsApi covers list/get/create", async () => {

@@ -118,8 +118,8 @@ export const passkeyRepository = {
     return cred ?? null;
   },
 
-  async findByUserId(userId: string) {
-    return db
+  async findByUserId(userId: string, client: DbClient = db) {
+    return client
       .select()
       .from(passkeyCredentials)
       .where(and(eq(passkeyCredentials.userId, userId), isNull(passkeyCredentials.revokedAt)));

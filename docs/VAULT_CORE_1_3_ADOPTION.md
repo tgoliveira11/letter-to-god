@@ -48,6 +48,8 @@ After WebAuthn verification, the server returns at most five encrypted variants 
 
 “Unbind this browser” deletes only its routing row and cookie. Disable requires an opaque proof issued after WebAuthn verification plus the locally matched variant ID. Under the credential lock it revalidates the active variant, revokes every variant, deletes every binding, and either clears vault capability on a sign-in credential or revokes a vault-only credential. Any failure rolls the transaction back.
 
+SelahKeep also exposes an app-owned bulk reset from unlocked `/vault/settings`. vault-core does not own credential persistence or account-passkey deletion, so the product service performs this transaction: lock every existing passkey credential in deterministic order, re-read vault capability after the locks, revoke vault-only credentials, clear only `vaultUnlockEnabled` on dual-purpose credentials, revoke all active `passkey_authorized_device` envelopes (including orphaned legacy rows), delete all browser bindings, and clear the routing cookie. Account-only credentials and account sign-in capability are never revoked. This reset does not process PRF output or plaintext vault material.
+
 ## AAD compatibility and sunset
 
 New `vault_key` writes must use exactly `SELAHKEEP_VAULT_PROFILE.aadContextEnvelope`. The profile keeps `legacyVaultKeyUnlock: true` so previously shipped envelopes with missing or null `aad.context` remain readable through vault-core 1.3. No `legacyVaultKeyAadContexts` strings are configured, so arbitrary explicit contexts fail closed.
@@ -66,6 +68,6 @@ Manual release matrix:
 - several variants where the first does not match and a later candidate matches;
 - legacy missing/null AAD envelope, canonical envelope, and an arbitrary explicit context (must fail);
 - non-extractable UVK with a valid vault-core inner-key memory cache, plus lock/cache-clear behavior;
-- Test, failed rebind, unbind, dual-purpose disable, and vault-only revoke.
+- Test, failed rebind, unbind, dual-purpose disable, vault-only revoke, and bulk reset with mixed vault-only/dual-purpose credentials while account sign-in remains usable.
 
 Roll out migration first, then application code. Keep vault password and recovery phrase available throughout. If app rollback is necessary, do not roll back or destructively remove the additive columns/index changes; older code must not create or replace passkey envelopes until compatibility is re-evaluated.

@@ -1,5 +1,10 @@
 import { apiClient } from "./client";
 
 export const passkeysApi = {
-  removeAll: () => apiClient.delete<{ success: boolean }>("/api/passkeys"),
+  removeAllVaultUnlock: () =>
+    apiClient.delete<{
+      success: boolean;
+      removedVaultPasskeyCount: number;
+      preservedSignInPasskeyCount: number;
+    }>("/api/passkeys/vault-unlock"),
 };
