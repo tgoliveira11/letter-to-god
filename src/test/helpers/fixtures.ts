@@ -23,6 +23,7 @@ export function encryptedPayload(
       userId: USER_ID,
       resourceId,
       field,
+      ...(field === "vault_key" ? { context: "selahkeep:vault-envelope:v1" } : {}),
     },
   };
 }

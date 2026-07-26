@@ -15,11 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Passkey vault device binding.** On “Add passkey for this device”, the server creates a `vault_passkey_device_bindings` row and sets HttpOnly cookie `selahkeep_vault_device` (UUID only). Vault unlock authentication options scope `allowCredentials` to the bound credential for this browser, avoiding the passkey picker when Mac and iPhone are both enrolled. Disable removes the binding and clears the cookie. Settings list bound devices. `GET /api/vault/status` and `GET /api/passkeys/vault-unlock` expose `passkeyUnlockAvailableOnThisDevice`; the vault dock, unlock page, and settings only offer passkey unlock when this browser is bound.
+- **Synced-passkey compatibility variants.** A logical WebAuthn credential may have up to five active PRF envelope variants and several browser bindings. Vault settings can append and locally verify a compatibility variant for the same synced credential without replacing a known-good envelope.
+- **Passkey vault device binding.** The HttpOnly `selahkeep_vault_device` cookie stores only a routing UUID. Each browser binding records the locally matched envelope variant; unbind removes only that browser, while credential disable/revoke removes all of its variants and bindings.
 
 ### Changed
 
-- **vault-core 1.1.2 lock hygiene.** Bump to `@tgoliveira/vault-core@^1.1.2`. Register `clearNoteBodyCache` via `registerVaultLockCleanup`; wrap vault-protected routes in `VaultSensitiveRegion` (overlay gate unchanged). Hooks holding decrypted note/search/attachment/version/transcription state clear via `useOnVaultLocked`; kanban card dialog and version diff use nested `VaultSensitiveRegion`; kanban board clears editing/search on lock. Removed redundant `clearNoteBodyCache` from `useRequireVault` subscribe (central cleanup handles it). Feature tests assert post-lock DOM hygiene with `assertNoVaultPlaintextInDocument`.
+- **vault-core 1.3.0 adoption.** Passkey ceremonies now use typed credential selection, preserved stored transports, verified PRF capability, bounded candidate unwrap, canonical SelahKeep AAD for new writes, and the package legacy-AAD router for old reads. The app continues to own WebAuthn verification, challenges, cookies, persistence, UI, and the additive database migration.
 
 ### Fixed
 
@@ -27,7 +28,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Note attachments deploy spikes.** `GET /api/notes/:id/attachments` no longer returns 500 when Drizzle wraps Postgres errors (`Failed query: …`) or when migration `0019` (`board_id`) lags a code deploy — list degrades to `[]` and mutations map to 503. The client hook dedupes in-flight list requests, backs off for 5s after a failed load, and keys reload on wrapped-key ciphertext instead of object identity to avoid retry storms during note detail re-renders.
 
-- **Passkey vault unlock on iOS (PR #42/#43 regression).** Restored iOS PRF ceremony parity removed during the per-device passkey merge: Safari credential-scoped PRF extraction, client-side `eval` alignment, platform `internal` transport pinning, envelope credential prefetch, and per-device decrypt-failure copy. A passkey envelope wrapped on Mac still requires adding a passkey on each unlock device.
+- **Passkey vault unlock on synced Apple credentials.** Stored WebAuthn transports are preserved instead of forcing `internal`. A new browser may try bounded envelope candidates and, while the vault is unlocked by password or recovery phrase, append a compatibility variant to the same credential.
+
+### Security
+
+- **PRF output remains browser-only.** Every WebAuthn response sent to app APIs is sanitized with vault-core 1.3.0; recursive server guards reject `clientExtensionResults.prf`, raw PRF output, or PRF hashes. The server returns only verified credential identity, opaque short-lived proofs, and encrypted candidates.
+- **Fail-closed passkey routing and mutation.** Missing cookies use an explicit allow-list; stale/inactive cookies return 409, are cleared, and require explicit rebind. Candidate `no_match`, test, and rebind failures do not mutate bindings. Variant cap checks and disable/revoke run under the credential row lock in one transaction.
 
 ### Added
 

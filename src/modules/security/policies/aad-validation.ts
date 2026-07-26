@@ -32,8 +32,15 @@ export function assertPayloadAad(
   }
 }
 
-export function assertVaultKeyAad(userId: string, payload: EncryptedPayload): void {
+export function assertVaultKeyAad(
+  userId: string,
+  payload: EncryptedPayload,
+  expectedContext: string
+): void {
   assertPayloadAad(payload, { userId, resourceId: userId, field: "vault_key" });
+  if (payload.aad.context !== expectedContext) {
+    throw new AadValidationError("AAD context does not match the canonical vault envelope context");
+  }
 }
 
 export function assertVaultSettingsAad(userId: string, payload: EncryptedPayload): void {

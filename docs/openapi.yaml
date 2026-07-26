@@ -1119,7 +1119,7 @@ paths:
   /api/passkeys/register:
     post:
       tags: [Passkeys]
-      summary: Passkey registration (options or verify)
+      summary: Register a credential only (options or sanitized verify; no vault envelope)
       security:
         - sessionCookie: []
       responses:
@@ -1128,12 +1128,22 @@ paths:
   /api/passkeys/authenticate:
     post:
       tags: [Passkeys]
-      summary: Explicit signed-in passkey vault unlock (options or verify)
+      summary: Vault unlock routing (options, sanitized verify candidates, or post-match bind)
       security:
         - sessionCookie: []
       responses:
         '200':
-          description: WebAuthn options or verification result
+          description: WebAuthn options, encrypted candidates, or browser binding result; never PRF output
+        '409':
+          description: Stale browser binding cleared; explicit passkey selection/rebind required
+    delete:
+      tags: [Passkeys]
+      summary: Unbind this browser only; credential and variants remain active
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Browser binding removed and cookie cleared
   /api/passkeys:
     delete:
       tags: [Passkeys]
@@ -1194,7 +1204,7 @@ paths:
   /api/account/passkeys/{id}/enable-vault-unlock:
     post:
       tags: [Account]
-      summary: Upgrade sign-in passkey to vault unlock (options or verify)
+      summary: Append a passkey envelope variant (options, sanitized verify, or encrypted persist)
       security:
         - sessionCookie: []
       parameters:
@@ -1206,7 +1216,32 @@ paths:
             format: uuid
       responses:
         '200':
-          description: WebAuthn options or success
+          description: WebAuthn options, opaque enrollment proof, or persisted variant identity
+  /api/account/passkeys/{id}/vault-unlock:
+    get:
+      tags: [Account]
+      summary: Get vault capability and active variant count for a passkey
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Vault passkey status }
+    delete:
+      tags: [Account]
+      summary: Disable credential vault capability after local candidate match
+      security:
+        - sessionCookie: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: All variants revoked and all browser bindings removed atomically }
   /api/account/2fa/status:
     get:
       tags: [Account]

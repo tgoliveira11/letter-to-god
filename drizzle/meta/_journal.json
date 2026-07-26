@@ -148,6 +148,13 @@
       "when": 1781340000000,
       "tag": "0020_vault_passkey_device_bindings",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785000000000,
+      "tag": "0021_vault_passkey_multi_device_variants",
+      "breakpoints": true
     }
   ]
 }

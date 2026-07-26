@@ -57,6 +57,7 @@ Phases 0–5 of the MVP are **complete**. The active implementation domain is **
 | [`releasing.md`](./releasing.md) | Manual releases, version invariant |
 | [`repo-settings.md`](./repo-settings.md) | GitHub branch protection |
 | [`CURRENT_PRODUCT_SURFACE.md`](./CURRENT_PRODUCT_SURFACE.md) | Live routes, APIs, integrations |
+| [`VAULT_CORE_1_3_ADOPTION.md`](./VAULT_CORE_1_3_ADOPTION.md) | Passkey schema migration, contracts, rollout, and rollback constraints |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Layers, data flow |
 | [`../AGENTS.md`](../AGENTS.md) | Agent workflow rules |
 

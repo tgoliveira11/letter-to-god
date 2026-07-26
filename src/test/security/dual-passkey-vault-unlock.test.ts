@@ -14,7 +14,8 @@ describe("dual passkey vault unlock credential filtering", () => {
     expect(source).toContain("buildVaultUnlockAuthenticationOptions");
     expect(source).toContain("deviceBindingId");
     expect(source).toContain("vaultPasskeyDeviceBindingRepository");
-    expect(source).toContain("scopeAuthenticationOptionsToDevice");
+    expect(source).toContain("requestedCredentialId");
+    expect(source).toContain("selectedEnvelopeVariantId");
     expect(source).not.toContain("passkeyPrfAuthExtensions");
     expect(source).toContain("PASSKEY_VAULT_UNLOCK_NOT_CONFIGURED_MESSAGE");
     expect(source).toContain("PASSKEY_ACCOUNT_ONLY_FOR_SIGN_IN_MESSAGE");
@@ -49,10 +50,11 @@ describe("dual passkey vault unlock credential filtering", () => {
     );
   });
 
-  it("filterAuthenticationOptionsForCredential preserves transports", () => {
+  it("vault-core credential selection preserves server transports", () => {
     const helper = readSource("src/lib/passkey/vault-unlock-authenticate.ts");
-    expect(helper).toContain("matchingCredential");
-    expect(helper).not.toContain("type: \"public-key\"");
+    expect(helper).toContain("credentialSelection");
+    expect(helper).toContain('transportPolicy: "preserve"');
+    expect(helper).not.toContain('transports: ["internal"]');
     expect(helper).toContain("PASSKEY_NOT_AVAILABLE_FOR_VAULT_UNLOCK_MESSAGE");
   });
 

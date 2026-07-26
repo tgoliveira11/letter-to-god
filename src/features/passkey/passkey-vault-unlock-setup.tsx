@@ -16,10 +16,14 @@ import { vaultApi } from "@/lib/api-client/vault";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import {
   extractPasskeyPrfOutput,
+  unlockVaultFromPasskeyEnvelopeCandidates,
   wrapVaultKeyForPasskey,
 } from "@/lib/crypto-client/passkey-vault";
 import {
+  persistVaultPasskeyBinding,
   runVaultUnlockAuthenticationCeremony,
+  unbindVaultPasskeyFromThisBrowser,
+  verifyVaultUnlockAuthentication,
 } from "@/lib/passkey/vault-unlock-authenticate";
 import { currentDeviceLabel } from "@/lib/passkey/device-label";
 import {
@@ -57,6 +61,11 @@ import {
   VAULT_PASSKEY_INDEPENDENCE_NOTE,
 } from "@/lib/passkey/vault-passkey-availability-messages";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
+import {
+  resolvePasskeyPrfCapability,
+  sanitizeWebAuthnResponseForServer,
+} from "@/lib/crypto-client/vault-passkey-browser";
+import type { EncryptedPayload as VaultCoreEncryptedPayload } from "@tgoliveira/vault-core";
 
 type VaultUnlockPasskey = {
   id: string;
@@ -65,6 +74,10 @@ type VaultUnlockPasskey = {
   vaultUnlockEnabled: boolean;
   prfSupported: boolean | null;
   credentialId: string;
+  credentialDeviceType?: "singleDevice" | "multiDevice" | null;
+  backupEligible?: boolean | null;
+  credentialBackedUp?: boolean | null;
+  activeEnvelopeVariantCount?: number;
 };
 
 type VaultDeviceBinding = {
@@ -72,6 +85,7 @@ type VaultDeviceBinding = {
   credentialId: string;
   deviceLabel: string;
   isCurrentDevice: boolean;
+  selectedEnvelopeVariantId?: string | null;
 };
 
 async function fetchVaultPasskeyData(): Promise<{
@@ -188,9 +202,8 @@ export function PasskeyVaultUnlockSetup({
   const hasVaultPasskey = passkeys.some((passkey) => passkey.vaultUnlockEnabled);
   const passkeyConfiguredOnAnotherDevice =
     serverPasskeyEnvelope && !passkeyUnlockAvailableOnThisDevice;
-  // Passkey PRF is device-specific for some providers, so vault unlock needs one passkey
-  // per device. Keep setup available even after a passkey exists, so the user can add
-  // the device they are currently on.
+  // Synced passkeys remain one logical credential. A browser binding only remembers
+  // the locally matched variant and never authorizes envelope mutation.
   const showPrimarySetup =
     setupAllowed &&
     vaultUnlocked &&
@@ -202,8 +215,156 @@ export function PasskeyVaultUnlockSetup({
     const assertion = await startAuthentication({
       optionsJSON: prepareAuthenticationOptions(options),
     });
-    const prfOutput = extractPasskeyPrfOutput(assertion.clientExtensionResults);
-    return { assertion, prfOutput };
+    return assertion;
+  }
+
+  /** Append one compatibility variant for an already verified logical credential. */
+  async function appendAndBindEnvelopeVariant(
+    credentialDbId: string,
+    expectedCredentialId: string,
+    vaultKey: CryptoKey
+  ) {
+    const enablePath = `/api/account/passkeys/${credentialDbId}/enable-vault-unlock`;
+    const enableOptions = (await apiClient.post(enablePath, {
+      action: "options",
+    })) as PublicKeyCredentialRequestOptionsJSON;
+    const assertion = await runCeremonyWithOptions(enableOptions);
+    const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
+    const enrollment = await apiClient.post<{
+      verified: true;
+      verifiedCredentialId: string;
+      enrollmentProof: string;
+    }>(enablePath, {
+      action: "verify",
+      response: sanitizeWebAuthnResponseForServer(assertion),
+    });
+    if (
+      enrollment.verifiedCredentialId !== assertion.id ||
+      enrollment.verifiedCredentialId !== expectedCredentialId
+    ) {
+      throw new Error("Verified passkey credential mismatch.");
+    }
+    const capability = resolvePasskeyPrfCapability({
+      ceremony: "authentication",
+      verifiedCredentialId: enrollment.verifiedCredentialId,
+      clientExtensionResults,
+    });
+    const prfOutput = extractPasskeyPrfOutput(
+      clientExtensionResults,
+      enrollment.verifiedCredentialId
+    );
+    if (capability.state !== "confirmed_authentication" || !prfOutput) {
+      throw new Error(
+        getPasskeyPrfDiagnosticMessage(
+          resolveCeremonyDiagnosticReason({ prfOutputPresent: false })
+        )
+      );
+    }
+
+    const encryptedVaultKey: EncryptedPayload = await wrapVaultKeyForPasskey(
+      vaultKey,
+      prfOutput,
+      userId,
+      userId
+    );
+    const persisted = await apiClient.post<{
+      verifiedCredentialId: string;
+      envelopeVariantId: string;
+      bindingProof: string;
+    }>(enablePath, {
+      action: "persist",
+      enrollmentProof: enrollment.enrollmentProof,
+      encryptedVaultKey,
+      prfSupported: true,
+    });
+    if (persisted.verifiedCredentialId !== expectedCredentialId) {
+      throw new Error("Persisted passkey credential mismatch.");
+    }
+    const localMatch = await unlockVaultFromPasskeyEnvelopeCandidates({
+      userId,
+      verifiedCredentialId: persisted.verifiedCredentialId,
+      candidates: [
+        {
+          envelopeVariantId: persisted.envelopeVariantId,
+          credentialId: persisted.verifiedCredentialId,
+          envelope: {
+            method: "passkey_prf",
+            encryptedVaultKey: encryptedVaultKey as VaultCoreEncryptedPayload,
+            kdfMetadata: null,
+            publicMetadata: {
+              credentialId: persisted.verifiedCredentialId,
+              prfRequired: true,
+            },
+          },
+        },
+      ],
+      prfOutput,
+      applySession: false,
+      cacheInnerKey: false,
+    });
+    if (localMatch.status !== "matched") {
+      throw new Error("The new passkey envelope could not be verified locally.");
+    }
+    await persistVaultPasskeyBinding({
+      bindingProof: persisted.bindingProof,
+      verifiedCredentialId: persisted.verifiedCredentialId,
+      selectedEnvelopeVariantId: localMatch.envelopeVariantId,
+      deviceLabel: currentDeviceLabel(),
+    });
+    return localMatch.envelopeVariantId;
+  }
+
+  async function verifyAndMatchCandidate(
+    assertion: Awaited<ReturnType<typeof startAuthentication>>,
+    persistBinding: boolean
+  ) {
+    const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
+    const verification = await verifyVaultUnlockAuthentication(assertion);
+    if (verification.verifiedCredentialId !== assertion.id) {
+      throw new Error("Verified passkey credential mismatch.");
+    }
+    const capability = resolvePasskeyPrfCapability({
+      ceremony: "authentication",
+      verifiedCredentialId: verification.verifiedCredentialId,
+      clientExtensionResults,
+    });
+    const prfOutput = extractPasskeyPrfOutput(
+      clientExtensionResults,
+      verification.verifiedCredentialId
+    );
+    if (capability.state !== "confirmed_authentication" || !prfOutput) {
+      throw new Error(
+        getPasskeyPrfDiagnosticMessage(
+          resolveCeremonyDiagnosticReason({ prfOutputPresent: false })
+        )
+      );
+    }
+
+    const match = await unlockVaultFromPasskeyEnvelopeCandidates({
+      userId,
+      verifiedCredentialId: verification.verifiedCredentialId,
+      candidates: verification.candidates,
+      prfOutput,
+      applySession: false,
+      cacheInnerKey: false,
+    });
+    if (match.status !== "matched") {
+      throw new Error(
+        match.status === "no_match"
+          ? "This passkey did not match any saved vault envelope. Unlock with your vault password or recovery phrase before adding a compatibility variant."
+          : "The saved passkey envelope candidates could not be validated."
+      );
+    }
+
+    if (persistBinding) {
+      await persistVaultPasskeyBinding({
+        bindingProof: verification.bindingProof,
+        verifiedCredentialId: verification.verifiedCredentialId,
+        selectedEnvelopeVariantId: match.envelopeVariantId,
+        deviceLabel: currentDeviceLabel(),
+      });
+    }
+    return { verification, match };
   }
 
   async function handleRegisterVaultPasskey() {
@@ -240,47 +401,29 @@ export function PasskeyVaultUnlockSetup({
 
       const registration = (await apiClient.post("/api/passkeys/register", {
         action: "verify",
-        response: attestation,
+        response: sanitizeWebAuthnResponseForServer(attestation),
         vaultOnly: true,
         friendlyName: currentDeviceLabel(),
-      })) as { credentialDbId?: string };
+      })) as { credentialDbId?: string; verifiedCredentialId?: string };
 
       const credentialDbId = registration.credentialDbId;
-      if (!credentialDbId) {
+      if (!credentialDbId || registration.verifiedCredentialId !== attestation.id) {
         throw new Error("Could not set up passkey vault unlock.");
       }
-
-      // Step 2: create the envelope from an AUTHENTICATION-ceremony PRF (`get`),
-      // matching the unlock ceremony. Registration (`create`) PRF is unreliable on
-      // iOS (create vs get can return different bytes), so it is never used to wrap.
-      const enablePath = `/api/account/passkeys/${credentialDbId}/enable-vault-unlock`;
-      const enableOptions = (await apiClient.post(enablePath, {
-        action: "options",
-      })) as PublicKeyCredentialRequestOptionsJSON;
-
-      const { assertion, prfOutput } = await runCeremonyWithOptions(enableOptions);
-      if (!prfOutput) {
-        const reason = resolveCeremonyDiagnosticReason({ prfOutputPresent: false });
-        setDiagnosticReason(reason);
-        setError(getPasskeyPrfDiagnosticMessage(reason));
-        return;
-      }
-
-      const encryptedVaultKey: EncryptedPayload = await wrapVaultKeyForPasskey(
-        vaultKey,
-        prfOutput,
-        userId,
-        userId
-      );
-
-      await apiClient.post(enablePath, {
-        action: "verify",
-        response: assertion,
-        encryptedVaultKey,
-        prfVaultEnvelope: true,
-        prfSupported: true,
-        deviceLabel: currentDeviceLabel(),
+      // Registration confirmation is informative; the following authentication
+      // ceremony is authoritative for usable PRF output.
+      resolvePasskeyPrfCapability({
+        ceremony: "registration",
+        credentialId: registration.verifiedCredentialId,
+        clientExtensionResults: attestation.clientExtensionResults as Record<string, unknown>,
       });
+
+      // Step 2 appends a variant derived from an authentication (`get`) PRF.
+      await appendAndBindEnvelopeVariant(
+        credentialDbId,
+        registration.verifiedCredentialId,
+        vaultKey
+      );
 
       setMessage(PASSKEY_VAULT_UNLOCK_ENABLED_MESSAGE);
       try {
@@ -324,14 +467,7 @@ export function PasskeyVaultUnlockSetup({
       const assertion = await runVaultUnlockAuthenticationCeremony(
         passkey?.credentialId ?? currentDeviceCredentialId
       );
-      const prfOutput = extractPasskeyPrfOutput(assertion.clientExtensionResults);
-
-      if (!prfOutput) {
-        const reason = resolveCeremonyDiagnosticReason({ prfOutputPresent: false });
-        setDiagnosticReason(reason);
-        setError(getPasskeyPrfDiagnosticMessage(reason));
-        return;
-      }
+      await verifyAndMatchCandidate(assertion, false);
 
       setMessage(PASSKEY_VAULT_UNLOCK_TEST_SUCCEEDED_MESSAGE);
       setDiagnosticReason("supported");
@@ -342,6 +478,58 @@ export function PasskeyVaultUnlockSetup({
         return;
       }
       setError(e instanceof Error ? e.message : "Passkey test failed.");
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function handleRebind(passkeyId: string) {
+    setLoadingId(passkeyId);
+    setError(null);
+    setMessage(null);
+    setDiagnosticReason(null);
+    try {
+      const passkey = passkeys.find((item) => item.id === passkeyId);
+      if (!passkey) throw new Error("Passkey not found.");
+      const assertion = await runVaultUnlockAuthenticationCeremony(passkey.credentialId);
+      await verifyAndMatchCandidate(assertion, true);
+      setMessage("This browser now uses the verified passkey envelope variant.");
+      setDiagnosticReason("supported");
+      await loadPasskeys();
+    } catch (e) {
+      if (isCeremonyCancellation(e)) {
+        setDiagnosticReason("ceremony_cancelled");
+        setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
+        return;
+      }
+      setError(e instanceof Error ? e.message : "Could not bind this browser.");
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function handleAddCompatibilityVariant(passkeyId: string) {
+    setLoadingId(passkeyId);
+    setError(null);
+    setMessage(null);
+    setDiagnosticReason(null);
+    try {
+      const passkey = passkeys.find((item) => item.id === passkeyId);
+      const vaultKey = getSessionVaultKey();
+      if (!passkey || !vaultKey) {
+        throw new Error("Unlock your vault before adding a compatibility variant.");
+      }
+      await appendAndBindEnvelopeVariant(passkey.id, passkey.credentialId, vaultKey);
+      setMessage("A compatibility envelope variant was added and verified on this browser.");
+      setDiagnosticReason("supported");
+      await loadPasskeys();
+    } catch (e) {
+      if (isCeremonyCancellation(e)) {
+        setDiagnosticReason("ceremony_cancelled");
+        setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
+        return;
+      }
+      setError(e instanceof Error ? e.message : "Could not add a compatibility variant.");
     } finally {
       setLoadingId(null);
     }
@@ -364,15 +552,15 @@ export function PasskeyVaultUnlockSetup({
         return;
       }
 
-      const options = (await apiClient.post(`/api/account/passkeys/${passkeyId}/vault-unlock`, {
-        action: "disable-options",
-      })) as PublicKeyCredentialRequestOptionsJSON;
-
-      const { assertion } = await runCeremonyWithOptions(options);
+      const passkey = passkeys.find((item) => item.id === passkeyId);
+      if (!passkey) throw new Error("Passkey not found.");
+      const assertion = await runVaultUnlockAuthenticationCeremony(passkey.credentialId);
+      const { verification, match } = await verifyAndMatchCandidate(assertion, false);
 
       await apiClient.delete(`/api/account/passkeys/${passkeyId}/vault-unlock`, {
-        response: assertion,
-        prfVaultEnvelope: true,
+        bindingProof: verification.bindingProof,
+        verifiedCredentialId: verification.verifiedCredentialId,
+        selectedEnvelopeVariantId: match.envelopeVariantId,
       });
 
       setMessage(PASSKEY_VAULT_UNLOCK_DISABLED_MESSAGE);
@@ -384,6 +572,21 @@ export function PasskeyVaultUnlockSetup({
         return;
       }
       setError(e instanceof Error ? e.message : "Could not disable passkey vault unlock.");
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
+  async function handleUnbindThisBrowser() {
+    setLoadingId("unbind");
+    setError(null);
+    setMessage(null);
+    try {
+      await unbindVaultPasskeyFromThisBrowser();
+      setMessage("This browser binding was removed. Your passkey and envelope variants remain active.");
+      await loadPasskeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not unbind this browser.");
     } finally {
       setLoadingId(null);
     }
@@ -424,15 +627,15 @@ export function PasskeyVaultUnlockSetup({
           {loadingId === "register"
             ? "Working…"
             : hasVaultPasskey || passkeyConfiguredOnAnotherDevice
-              ? "Add a passkey for this device"
+              ? "Add an independent passkey"
               : "Set up passkey vault unlock"}
         </Button>
       )}
 
       {(hasVaultPasskey || passkeyConfiguredOnAnotherDevice) && showPrimarySetup && (
         <p className="text-sm text-[var(--muted)]">
-          Passkey unlock is per device. Add a passkey on each device you want to unlock
-          with — a passkey set up on one device may not unlock the vault on another.
+          First try an existing synced passkey below. Register an independent passkey only for a
+          separate provider, security key, or single-device credential.
         </p>
       )}
 
@@ -463,7 +666,10 @@ export function PasskeyVaultUnlockSetup({
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="success">Vault unlock: configured</Badge>
                     {passkey.credentialId === currentDeviceCredentialId ? (
-                      <Badge variant="info">This device</Badge>
+                      <Badge variant="info">This browser</Badge>
+                    ) : null}
+                    {passkey.credentialDeviceType === "multiDevice" ? (
+                      <Badge variant="info">Synced credential</Badge>
                     ) : null}
                   </div>
                 </div>
@@ -476,6 +682,22 @@ export function PasskeyVaultUnlockSetup({
                         onClick={() => void handleTest(passkey.id)}
                       >
                         {loadingId === passkey.id ? "Working…" : "Test"}
+                      </Button>
+                      {passkey.credentialId !== currentDeviceCredentialId ? (
+                        <Button
+                          variant="secondary"
+                          disabled={!canManage || loadingId === passkey.id}
+                          onClick={() => void handleRebind(passkey.id)}
+                        >
+                          Use on this browser
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="secondary"
+                        disabled={!canManage || loadingId === passkey.id}
+                        onClick={() => void handleAddCompatibilityVariant(passkey.id)}
+                      >
+                        Add compatibility variant
                       </Button>
                       <Button
                         variant="secondary"
@@ -504,6 +726,15 @@ export function PasskeyVaultUnlockSetup({
               </li>
             ))}
           </ul>
+          {deviceBindings.some((binding) => binding.isCurrentDevice) ? (
+            <Button
+              variant="secondary"
+              disabled={loadingId === "unbind"}
+              onClick={() => void handleUnbindThisBrowser()}
+            >
+              {loadingId === "unbind" ? "Working…" : "Unbind this browser"}
+            </Button>
+          ) : null}
         </div>
       )}
 

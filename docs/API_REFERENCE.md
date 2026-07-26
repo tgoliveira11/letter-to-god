@@ -78,9 +78,14 @@ Passkeys authenticate the account separately from vault decryption. A passkey un
 | `GET` | `/api/account/passkeys` | Session |
 | `POST` | `/api/account/passkeys/register` | Session |
 | `DELETE` | `/api/account/passkeys/:id` | Session |
-| `POST` | `/api/account/passkeys/:id/enable-vault-unlock` | Session (vault unlocked client-side) |
+| `POST` | `/api/account/passkeys/:id/enable-vault-unlock` | Session (actions `options`, `verify`, `persist`; persist requires locally unlocked vault) |
+| `GET` | `/api/account/passkeys/:id/vault-unlock` | Session |
+| `DELETE` | `/api/account/passkeys/:id/vault-unlock` | Session + opaque proof for locally matched variant |
+| `GET` | `/api/passkeys/vault-unlock` | Session |
+| `POST` | `/api/passkeys/authenticate` | Session (actions `options`, `verify`, `bind`; `purpose: vault_unlock`) |
+| `DELETE` | `/api/passkeys/authenticate` | Session; unbind current browser only |
 
-Passkey vault unlock uses `POST /api/passkeys/authenticate` as a separate signed-in ceremony from `/vault/unlock` or the vault dock. Enabling vault unlock for an account passkey is managed from `/vault/settings`.
+Passkey vault unlock is separate from sign-in. `verify` returns the verified credential ID, an opaque short-lived proof, and at most five encrypted envelope candidates. PRF output stays in the browser: clients sanitize WebAuthn responses, confirm PRF against the verified ID, unwrap candidates locally, and call `bind` only after `status: matched`. Missing binding cookies use an explicit credential allow-list; stale cookies receive 409, are cleared, and require explicit rebind. Settings may append a compatibility variant to the same synced credential; the server never evicts an active variant implicitly.
 
 ### Vault recovery phrase
 

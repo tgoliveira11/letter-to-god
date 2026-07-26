@@ -11,6 +11,16 @@ export class ChallengeValidationError extends Error {
 }
 
 export const passkeyRepository = {
+  async lockForVaultMutation(id: string, userId: string, client: DbClient = db) {
+    await client.execute(sql`
+      SELECT id
+      FROM ${passkeyCredentials}
+      WHERE ${passkeyCredentials.id} = ${id}
+        AND ${passkeyCredentials.userId} = ${userId}
+      FOR UPDATE
+    `);
+  },
+
   async createCredential(
     data: {
       userId: string;
@@ -22,6 +32,9 @@ export const passkeyRepository = {
       signInEnabled?: boolean;
       vaultUnlockEnabled?: boolean;
       prfSupported?: boolean | null;
+      credentialDeviceType?: "singleDevice" | "multiDevice" | null;
+      backupEligible?: boolean | null;
+      credentialBackedUp?: boolean | null;
     },
     client: DbClient = db
   ) {
@@ -37,6 +50,9 @@ export const passkeyRepository = {
         signInEnabled: data.signInEnabled ?? true,
         vaultUnlockEnabled: data.vaultUnlockEnabled ?? false,
         prfSupported: data.prfSupported ?? null,
+        credentialDeviceType: data.credentialDeviceType ?? null,
+        backupEligible: data.backupEligible ?? null,
+        credentialBackedUp: data.credentialBackedUp ?? null,
       })
       .returning();
     return cred;
@@ -64,6 +80,9 @@ export const passkeyRepository = {
       vaultUnlockEnabled?: boolean;
       prfSupported?: boolean | null;
       friendlyName?: string | null;
+      credentialDeviceType?: "singleDevice" | "multiDevice" | null;
+      backupEligible?: boolean | null;
+      credentialBackedUp?: boolean | null;
     },
     client: DbClient = db
   ) {

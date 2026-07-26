@@ -2,7 +2,7 @@
 
 Living inventory of what the app exposes **today**. Update this file when routes, APIs, jobs, integrations, or shipped/planned status changes.
 
-**Last reviewed:** 2026-07-03 · **Version in repo:** see `package.json`
+**Last reviewed:** 2026-07-25 · **Version in repo:** see `package.json`
 
 ---
 
@@ -103,7 +103,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | Audio file upload transcribe | Shipped | On-device decode ladder |
 | Encrypted local drafts | Shipped | IndexedDB; not server plaintext |
 | Vault auto-lock | Shipped | Client session timer |
-| Passkey PRF vault unlock | Shipped | Per-device passkeys; HttpOnly `selahkeep_vault_device` cookie scopes unlock to this browser |
+| Passkey PRF vault unlock | Shipped | vault-core 1.3 candidates; synced credentials may have bounded compatibility variants and several HttpOnly-cookie browser bindings |
 | Note Kanban generation | Shipped | Deterministic on-device parsing of decrypted note markdown; no LLM/plaintext egress |
 | Note ↔ Kanban bidirectional sync | Shipped | Note-bound boards sync checklist/list structure and card state client-side (debounced); encryption unchanged |
 | MCP AI integrations | Shipped (when `INTEGRATIONS_ENABLED`) | Local MCP server + optional bridge; scoped read/write on shared notes/boards only |

@@ -14,11 +14,15 @@ const mocks = vi.hoisted(() => ({
   findByCredentialId: vi.fn(),
   updateCounter: vi.fn(),
   updateLastUsedAt: vi.fn(),
+  updateCredentialFlags: vi.fn(),
+  lockForVaultMutation: vi.fn(),
   createEnvelope: vi.fn(),
   revokeEnvelope: vi.fn(),
   findActiveEnvelopesByUserId: vi.fn(),
   findActiveEnvelopeByMethod: vi.fn(),
   findActivePasskeyEnvelopeByCredentialId: vi.fn(),
+  findActivePasskeyEnvelopeVariants: vi.fn(),
+  findActivePasskeyEnvelopeVariant: vi.fn(),
   record: vi.fn(),
   generateRegistrationOptions: vi.fn(),
   verifyRegistrationResponse: vi.fn(),
@@ -47,6 +51,8 @@ vi.mock("@/server/repositories/passkey-repository", () => ({
     findByCredentialId: mocks.findByCredentialId,
     updateCounter: mocks.updateCounter,
     updateLastUsedAt: mocks.updateLastUsedAt,
+    updateCredentialFlags: mocks.updateCredentialFlags,
+    lockForVaultMutation: mocks.lockForVaultMutation,
   },
 }));
 
@@ -57,6 +63,8 @@ vi.mock("@/server/repositories/vault-repository", () => ({
     findActiveEnvelopesByUserId: mocks.findActiveEnvelopesByUserId,
     findActiveEnvelopeByMethod: mocks.findActiveEnvelopeByMethod,
     findActivePasskeyEnvelopeByCredentialId: mocks.findActivePasskeyEnvelopeByCredentialId,
+    findActivePasskeyEnvelopeVariants: mocks.findActivePasskeyEnvelopeVariants,
+    findActivePasskeyEnvelopeVariant: mocks.findActivePasskeyEnvelopeVariant,
   },
 }));
 
@@ -97,8 +105,10 @@ describe("passkey service", () => {
     mocks.findActiveEnvelopesByUserId.mockResolvedValue([]);
     mocks.listDeviceBindingsByUserId.mockResolvedValue([]);
     mocks.findDeviceBindingByIdForUser.mockResolvedValue(null);
+    mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue([]);
     mocks.bindPasskeyToDevice.mockResolvedValue({ bindingId: "binding-1" });
     mocks.createCredential.mockResolvedValue({ id: "cred-db-id" });
+    mocks.createEnvelope.mockResolvedValue({ id: "env-new" });
     mocks.generateRegistrationOptions.mockResolvedValue({ challenge: "reg-challenge" });
     mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: "auth-challenge" });
   });
@@ -158,7 +168,7 @@ describe("passkey service", () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
   });
 
-  it("verifies registration and stores passkey envelope", async () => {
+  it("verifies registration without storing an envelope or browser binding", async () => {
     mocks.consumeValidChallenge.mockResolvedValue({ id: "ch-1", challenge: "reg-challenge" });
     mocks.verifyRegistrationResponse.mockResolvedValue({
       verified: true,
@@ -180,14 +190,13 @@ describe("passkey service", () => {
 
     const result = await passkeyService.verifyRegistration(
       USER_ID,
-      registrationResponse("reg-challenge"),
-      encryptedPayload("vault_key", USER_ID),
-      { prfVaultEnvelope: true }
+      registrationResponse("reg-challenge")
     );
 
     expect(result.verified).toBe(true);
     expect(mocks.createCredential).toHaveBeenCalled();
-    expect(mocks.createEnvelope).toHaveBeenCalled();
+    expect(mocks.createEnvelope).not.toHaveBeenCalled();
+    expect(mocks.bindPasskeyToDevice).not.toHaveBeenCalled();
     expect(mocks.revokeEnvelope).not.toHaveBeenCalled();
     expect(mocks.record).toHaveBeenCalledWith(
       "passkey_added",
@@ -216,14 +225,14 @@ describe("passkey service", () => {
     await passkeyService.verifyRegistration(
       USER_ID,
       registrationResponse("reg-challenge"),
-      encryptedPayload("vault_key", USER_ID),
-      { prfVaultEnvelope: true, vaultOnly: true }
+      { vaultOnly: true }
     );
 
     expect(mocks.createCredential).toHaveBeenCalledWith(
       expect.objectContaining({
         signInEnabled: false,
-        vaultUnlockEnabled: true,
+        vaultUnlockEnabled: false,
+        prfSupported: null,
         friendlyName: "Vault passkey",
       }),
       expect.anything()
@@ -237,31 +246,10 @@ describe("passkey service", () => {
     ).rejects.toThrow("Invalid or expired challenge");
   });
 
-  it("rejects passkey vault envelope without PRF confirmation", async () => {
-    mocks.consumeValidChallenge.mockResolvedValue({ id: "ch-1", challenge: "reg-challenge" });
-    mocks.verifyRegistrationResponse.mockResolvedValue({
-      verified: true,
-      registrationInfo: {
-        credential: {
-          id: "cred-id",
-          publicKey: new Uint8Array(32),
-          counter: 0,
-          transports: ["internal"],
-        },
-        credentialDeviceType: "singleDevice",
-        credentialBackedUp: false,
-      },
-    });
-
-    await expect(
-      passkeyService.verifyRegistration(
-        USER_ID,
-        registrationResponse("reg-challenge"),
-        encryptedPayload("vault_key", USER_ID)
-      )
-    ).rejects.toThrow("Passkey vault unlock requires PRF support");
+  it("does not expose registration-time envelope persistence", () => {
+    expect(passkeyService.verifyRegistration).toHaveLength(3);
     expect(mocks.createEnvelope).not.toHaveBeenCalled();
-    expect(mocks.revokeEnvelope).not.toHaveBeenCalled();
+    expect(mocks.bindPasskeyToDevice).not.toHaveBeenCalled();
   });
 
   it("registers passkey credential without vault envelope when none is provided", async () => {
@@ -301,7 +289,7 @@ describe("passkey service", () => {
     );
   });
 
-  it("vault unlock options include the envelope credential with internal transport (single device)", async () => {
+  it("vault unlock options preserve every stored transport for the envelope credential", async () => {
     mocks.findActiveEnvelopesByUserId.mockResolvedValue([
       {
         id: "env-1",
@@ -328,10 +316,10 @@ describe("passkey service", () => {
       purpose: "vault_unlock",
     });
 
-    // Only the credential with an active envelope; hybrid dropped, internal pinned.
+    // Only the credential with an active envelope; transports are preserved exactly.
     expect(mocks.generateAuthenticationOptions).toHaveBeenCalledWith(
       expect.objectContaining({
-        allowCredentials: [{ id: "vault-cred", transports: ["internal"] }],
+        allowCredentials: [{ id: "vault-cred", transports: ["internal", "hybrid"] }],
         userVerification: "required",
         extensions: expect.objectContaining({
           prf: expect.objectContaining({ eval: expect.any(Object) }),
@@ -400,6 +388,54 @@ describe("passkey service", () => {
     );
   });
 
+  it("fails closed when the browser binding cookie is stale", async () => {
+    mocks.findActiveEnvelopesByUserId.mockResolvedValue([
+      {
+        id: "env-a",
+        method: "passkey_authorized_device",
+        publicMetadata: { credentialId: "vault-a" },
+      },
+    ]);
+    mocks.findByUserId.mockResolvedValue([
+      { id: "db-a", credentialId: "vault-a", vaultUnlockEnabled: true },
+    ]);
+    mocks.findDeviceBindingByIdForUser.mockResolvedValue(null);
+
+    await expect(
+      passkeyService.getAuthenticationOptions(USER_ID, undefined, {
+        purpose: "vault_unlock",
+        deviceBindingId: "stale-binding",
+      })
+    ).rejects.toThrow("binding is stale");
+    expect(mocks.generateAuthenticationOptions).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a binding points to a credential without an active variant", async () => {
+    mocks.findActiveEnvelopesByUserId.mockResolvedValue([
+      {
+        id: "env-a",
+        method: "passkey_authorized_device",
+        publicMetadata: { credentialId: "vault-a" },
+      },
+    ]);
+    mocks.findByUserId.mockResolvedValue([
+      { id: "db-a", credentialId: "vault-a", vaultUnlockEnabled: true },
+      { id: "db-inactive", credentialId: "vault-inactive", vaultUnlockEnabled: true },
+    ]);
+    mocks.findDeviceBindingByIdForUser.mockResolvedValue({
+      id: "binding-1",
+      passkeyCredentialId: "db-inactive",
+    });
+
+    await expect(
+      passkeyService.getAuthenticationOptions(USER_ID, undefined, {
+        purpose: "vault_unlock",
+        deviceBindingId: "binding-1",
+      })
+    ).rejects.toThrow("binding is stale");
+    expect(mocks.generateAuthenticationOptions).not.toHaveBeenCalled();
+  });
+
   it("vault unlock offers every per-device passkey when no device binding", async () => {
     // Multi-device: one envelope per device. Unlock offers ALL of them so the user can
     // authenticate with the passkey local to the current device. A single `eval` salt is
@@ -418,8 +454,8 @@ describe("passkey service", () => {
       },
     ]);
     mocks.findByUserId.mockResolvedValue([
-      { credentialId: "vault-a", transports: ["internal"], vaultUnlockEnabled: true },
-      { credentialId: "vault-b", transports: ["internal", "hybrid"], vaultUnlockEnabled: true },
+      { id: "db-a", credentialId: "vault-a", transports: ["internal"], vaultUnlockEnabled: true },
+      { id: "db-b", credentialId: "vault-b", transports: ["internal", "hybrid"], vaultUnlockEnabled: true },
     ]);
 
     await passkeyService.getAuthenticationOptions(USER_ID, undefined, {
@@ -429,13 +465,13 @@ describe("passkey service", () => {
     const call = mocks.generateAuthenticationOptions.mock.calls[0][0];
     expect(call.allowCredentials).toEqual([
       { id: "vault-a", transports: ["internal"] },
-      { id: "vault-b", transports: ["internal"] },
+      { id: "vault-b", transports: ["internal", "hybrid"] },
     ]);
     expect(call.extensions.prf.eval).toBeDefined();
     expect(call.extensions.prf.evalByCredential).toBeUndefined();
   });
 
-  it("verifyAuthentication returns vault envelope", async () => {
+  it("purpose-less verification never returns a vault envelope", async () => {
     mocks.consumeValidChallenge.mockResolvedValue({ id: "ch-1", challenge: "auth-challenge" });
     mocks.findByCredentialId.mockResolvedValue({
       userId: USER_ID,
@@ -448,9 +484,6 @@ describe("passkey service", () => {
     mocks.verifyAuthenticationResponse.mockResolvedValue({
       verified: true,
       authenticationInfo: { newCounter: 1 },
-    });
-    mocks.findActivePasskeyEnvelopeByCredentialId.mockResolvedValue({
-      encryptedVaultKey: encryptedPayload("vault_key", USER_ID),
     });
 
     const clientDataJSON = Buffer.from(
@@ -466,7 +499,8 @@ describe("passkey service", () => {
     });
 
     expect(result.verified).toBe(true);
-    expect(result.encryptedVaultKey).toBeTruthy();
+    expect(result).toEqual({ verified: true });
+    expect(mocks.findActivePasskeyEnvelopeByCredentialId).not.toHaveBeenCalled();
   });
 
   it("vault unlock verify rejects account-only credential", async () => {
@@ -539,9 +573,10 @@ describe("passkey service", () => {
     ).rejects.toThrow("This passkey is not linked to vault unlock.");
   });
 
-  it("vault unlock verify returns envelope for vault-enabled credential", async () => {
+  it("vault unlock verify returns bounded candidates for the verified credential", async () => {
     mocks.consumeValidChallenge.mockResolvedValue({ id: "ch-1", challenge: "auth-challenge" });
     mocks.findByCredentialId.mockResolvedValue({
+      id: "db-vault",
       userId: USER_ID,
       credentialId: "vault-cred",
       publicKey: Buffer.from(new Uint8Array(32)).toString("base64url"),
@@ -553,10 +588,11 @@ describe("passkey service", () => {
       verified: true,
       authenticationInfo: { newCounter: 1 },
     });
-    mocks.findActivePasskeyEnvelopeByCredentialId.mockResolvedValue({
+    mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue([{
+      id: "env-1",
       encryptedVaultKey: encryptedPayload("vault_key", USER_ID),
       publicMetadata: { prfRequired: true },
-    });
+    }]);
 
     const clientDataJSON = Buffer.from(
       JSON.stringify({ type: "webauthn.get", challenge: "auth-challenge", origin: "http://localhost:3001" })
@@ -575,10 +611,13 @@ describe("passkey service", () => {
     );
 
     expect(result.verified).toBe(true);
-    expect(result.encryptedVaultKey).toBeTruthy();
+    expect(result.verifiedCredentialId).toBe("vault-cred");
+    expect(result.candidates).toEqual([
+      expect.objectContaining({ envelopeVariantId: "env-1", credentialId: "vault-cred" }),
+    ]);
   });
 
-  it("general verify may return null envelope for account-only credential", async () => {
+  it("general account verification returns no vault fields", async () => {
     mocks.consumeValidChallenge.mockResolvedValue({ id: "ch-1", challenge: "auth-challenge" });
     mocks.findByCredentialId.mockResolvedValue({
       userId: USER_ID,
@@ -607,7 +646,7 @@ describe("passkey service", () => {
     });
 
     expect(result.verified).toBe(true);
-    expect(result.encryptedVaultKey).toBeNull();
+    expect(result).toEqual({ verified: true });
   });
 
   it("verifyAuthentication rejects unknown credential", async () => {
@@ -690,8 +729,7 @@ describe("passkey service", () => {
     await passkeyService.verifyRegistration(
       USER_ID,
       registrationResponse("reg-challenge"),
-      encryptedPayload("vault_key", USER_ID),
-      { prfVaultEnvelope: true, vaultOnly: true }
+      { vaultOnly: true }
     );
 
     expect(mocks.createCredential).toHaveBeenCalledWith(

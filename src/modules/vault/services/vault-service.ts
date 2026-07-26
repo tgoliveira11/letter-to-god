@@ -10,6 +10,7 @@ import {
 import { enforceRateLimit, RateLimitError } from "@/server/policies/rate-limit";
 import { deriveSetupPhase } from "@/lib/vault/vault-status";
 import { resolvePasskeyUnlockAvailableOnThisDevice } from "@/server/services/vault-passkey-device-binding-service";
+import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
 
 export const vaultService = {
   async setup(userId: string, input: VaultSetupInput) {
@@ -33,7 +34,7 @@ export const vaultService = {
       });
 
       for (const envelope of input.envelopes) {
-        assertVaultKeyAad(userId, envelope.encryptedVaultKey);
+        assertVaultKeyAad(userId, envelope.encryptedVaultKey, SELAHKEEP_VAULT_PROFILE.aadContextEnvelope);
         if (envelope.kdfMetadata.kdf !== "argon2id") {
           throw new Error("Vault envelopes require Argon2id KDF metadata");
         }
@@ -64,7 +65,7 @@ export const vaultService = {
       const vault = await vaultRepository.createVault(userId, input.vaultVersion, tx);
 
       for (const envelope of input.envelopes) {
-        assertVaultKeyAad(userId, envelope.encryptedVaultKey);
+        assertVaultKeyAad(userId, envelope.encryptedVaultKey, SELAHKEEP_VAULT_PROFILE.aadContextEnvelope);
 
         await vaultRepository.createEnvelope(
           {
@@ -196,7 +197,7 @@ export const vaultService = {
     const vault = await vaultRepository.findVaultByUserId(userId);
     if (!vault) throw new NotFoundError("Vault not initialized");
 
-    assertVaultKeyAad(userId, input.encryptedVaultKey);
+    assertVaultKeyAad(userId, input.encryptedVaultKey, SELAHKEEP_VAULT_PROFILE.aadContextEnvelope);
     if (input.kdfMetadata.kdf !== "argon2id") {
       throw new Error("Recovery code envelope requires Argon2id KDF metadata");
     }
@@ -231,7 +232,7 @@ export const vaultService = {
       throw new Error("Recovery phrase replacement requires vault-v2");
     }
 
-    assertVaultKeyAad(userId, input.encryptedVaultKey);
+    assertVaultKeyAad(userId, input.encryptedVaultKey, SELAHKEEP_VAULT_PROFILE.aadContextEnvelope);
     if (input.kdfMetadata.kdf !== "argon2id") {
       throw new Error("Recovery phrase envelope requires Argon2id KDF metadata");
     }
