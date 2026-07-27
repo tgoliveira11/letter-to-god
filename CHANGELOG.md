@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-07-27
+
 ### Added
 
 - **Deterministic application state.** One server-resolved bootstrap now seeds the account session, effective secure-auth UI configuration, vault status, admin access, and namespaced auto-lock preference. Account replacement synchronously hides and clears prior-owner private state; centralized capability and route loading/error boundaries avoid false empty states.
