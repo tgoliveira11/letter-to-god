@@ -1,6 +1,6 @@
 # Testing Strategy
 
-Last updated: 2026-07-01
+Last updated: 2026-07-27
 
 ## Overview
 
@@ -79,6 +79,8 @@ Repository adapters and most page components are covered indirectly via service/
 `src/test/features/accessibility.test.tsx` runs axe on the landing page with `SiteShell`.
 
 ## Security tests
+
+Deterministic application-state changes must cover account replacement DOM hygiene and stale async settlement after owner, vault epoch, resource, encrypted-key identity, or request-generation changes. See [`TDR_DETERMINISTIC_APPLICATION_STATE.md`](./TDR_DETERMINISTIC_APPLICATION_STATE.md).
 
 See `.cursor/rules/testing.md` for the full checklist (sentinel phrase, IndexedDB, passkeys, account sessions, 2FA, etc.).
 

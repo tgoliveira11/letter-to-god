@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import {
   integrationsApi,
@@ -17,52 +17,95 @@ import {
 } from "@/lib/crypto-client/integrations";
 import { unwrapNoteKey } from "@/lib/crypto-client/note-key";
 import { unwrapContentKey } from "@/lib/crypto-client/kanban";
+import { useApplicationState } from "@/components/application-state-provider";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 export function useIntegrations(enabled: boolean) {
+  const { ownerId } = useApplicationState();
   const [integrations, setIntegrations] = useState<IntegrationListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   const reload = useCallback(async () => {
-    if (!enabled) return;
+    if (!enabled || !ownerId) return;
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: "integrations",
+    });
     setLoading(true);
     setError(null);
     try {
       const rows = await integrationsApi.list();
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setIntegrations(rows);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load integrations");
+      if (!isAsyncOwnershipCancellation(e)) {
+        setError(e instanceof Error ? e.message : "Failed to load integrations");
+      }
     } finally {
-      setLoading(false);
+      if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, ownerId]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (!enabled || !ownerId) {
+      ownershipRef.current.invalidate();
+      setIntegrations([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    void reload().catch((loadError: unknown) => {
+      if (!isAsyncOwnershipCancellation(loadError)) {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load integrations");
+        setLoading(false);
+      }
+    });
+  }, [enabled, ownerId, reload]);
 
   useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
     setIntegrations([]);
     setError(null);
     setLoading(false);
   });
 
   const createIntegration = useCallback(async (name: string) => {
+    if (!ownerId) throw new Error("Not authenticated");
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: "integration:create",
+    });
     const created = await integrationsApi.create(name);
+    assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
     const iek = await deriveIntegrationKey(created.integrationId);
+    assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
     const integrationKey = await exportIntegrationKeyBase64Url(iek);
-    await reload();
+    assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+    const rows = await integrationsApi.list();
+    assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+    setIntegrations(rows);
     return { ...created, integrationKey } satisfies CreateIntegrationResponse & {
       integrationKey: string;
     };
-  }, [reload]);
+  }, [ownerId]);
 
   const revokeIntegration = useCallback(
     async (id: string) => {
+      if (!ownerId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId,
+        resourceId: `integration:${id}`,
+      });
       await integrationsApi.revoke(id);
-      await reload();
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      const rows = await integrationsApi.list();
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      setIntegrations(rows);
     },
-    [reload]
+    [ownerId]
   );
 
   const saveGrants = useCallback(
@@ -75,18 +118,27 @@ export function useIntegrations(enabled: boolean) {
         permissions: "read" | "write";
       }>
     ): Promise<IntegrationGrantSummary[]> => {
+      if (!ownerId || ownerId !== userId) throw new Error("Account ownership changed");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId,
+        resourceId: `integration-grants:${integrationId}`,
+      });
       const iek = await deriveIntegrationKey(integrationId);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       const grants = [];
 
       for (const item of items) {
         let resourceKey: CryptoKey;
         if (item.resourceType === "note") {
           const note = await notesApi.get(item.resourceId);
+          assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
           resourceKey = await unwrapNoteKey(note.encryptedWrappedNoteKey);
         } else {
           const board = await kanbanApi.get(item.resourceId);
+          assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
           resourceKey = await unwrapContentKey(board.encryptedWrappedKey);
         }
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
 
         const encryptedWrappedKey = await wrapResourceKeyForIntegration(
           userId,
@@ -95,6 +147,7 @@ export function useIntegrations(enabled: boolean) {
           resourceKey,
           iek
         );
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
 
         grants.push({
           resourceType: item.resourceType,
@@ -104,9 +157,11 @@ export function useIntegrations(enabled: boolean) {
         });
       }
 
-      return integrationsApi.upsertGrants(integrationId, { grants });
+      const saved = await integrationsApi.upsertGrants(integrationId, { grants });
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      return saved;
     },
-    []
+    [ownerId]
   );
 
   return {

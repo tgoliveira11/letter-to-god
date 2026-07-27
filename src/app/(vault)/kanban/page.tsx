@@ -38,7 +38,7 @@ export default function KanbanBoardsPage() {
   } = useKanban(vaultUserId);
 
   useEffect(() => {
-    if (canRead) void loadStandaloneBoards();
+    if (canRead) void loadStandaloneBoards().catch(() => undefined);
   }, [canRead, loadStandaloneBoards]);
 
   if (vault.status === "loading" || vault.status === "redirecting" || vaultClient.status === "loading") {

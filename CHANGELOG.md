@@ -15,11 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Deterministic application state.** One server-resolved bootstrap now seeds the account session, effective secure-auth UI configuration, vault status, admin access, and namespaced auto-lock preference. Account replacement synchronously hides and clears prior-owner private state; centralized capability and route loading/error boundaries avoid false empty states.
+- **Account preferences.** Delegated secure-auth 0.7.0 preference routes and migration `0022_secure_auth_user_preferences.sql` persist the vault auto-lock setting as account configuration without vault keys or note plaintext.
 - **Synced-passkey compatibility variants.** A logical WebAuthn credential may have up to five active PRF envelope variants and several browser bindings. Vault settings can append and locally verify a compatibility variant for the same synced credential without replacing a known-good envelope.
 - **Passkey vault device binding.** The HttpOnly `selahkeep_vault_device` cookie stores only a routing UUID. Each browser binding records the locally matched envelope variant; unbind removes only that browser, while credential disable/revoke removes all of its variants and bindings.
 
 ### Changed
 
+- **Ownership-aware private workflows.** Vault setup/unlock/recovery/passkey work now uses vault-core 1.5.1 owner operations and leases. Notes, drafts, versions, attachments, Kanban, integrations, storage, and voice flows discard late async results unless owner, vault epoch, resource, encrypted-key identity, and request generation remain current.
+- **Password KDF upgrade persistence.** A vault-core-recommended Argon2id upgrade now reasserts the active lease and atomically replaces only the encrypted password envelope; the prior implementation calculated the upgrade but discarded it.
+- **Dependency baseline.** Pinned `@tgoliveira/secure-auth@0.7.0`, `@tgoliveira/vault-core@1.5.1`, `@tgoliveira/outpost@1.2.2`, `next@16.2.11`, and `next-auth@4.24.15`.
 - **vault-core 1.3.0 adoption.** Passkey ceremonies now use typed credential selection, preserved stored transports, verified PRF capability, bounded candidate unwrap, canonical SelahKeep AAD for new writes, and the package legacy-AAD router for old reads. The app continues to own WebAuthn verification, challenges, cookies, persistence, UI, and the additive database migration.
 
 ### Fixed
@@ -33,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- **Fail-closed account/vault transitions.** Logout, lock, and account replacement invalidate outstanding operations and leases before stale plaintext-derived state can commit; unresolved identity and preference failures no longer masquerade as ready or empty state.
 - **Bulk vault-passkey removal preserves the auth boundary.** `DELETE /api/passkeys/vault-unlock` runs under a fully authenticated session and one database transaction, clears the routing cookie, removes only vault-owned bindings/envelopes/capabilities, and never delegates account-passkey deletion to the product layer.
 - **PRF output remains browser-only.** Every WebAuthn response sent to app APIs is sanitized with vault-core 1.3.0; recursive server guards reject `clientExtensionResults.prf`, raw PRF output, or PRF hashes. The server returns only verified credential identity, opaque short-lived proofs, and encrypted candidates.
 - **Fail-closed passkey routing and mutation.** Missing cookies use an explicit allow-list; stale/inactive cookies return 409, are cleared, and require explicit rebind. Candidate `no_match`, test, and rebind failures do not mutate bindings. Variant cap checks and disable/revoke run under the credential row lock in one transaction.

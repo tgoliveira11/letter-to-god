@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import {
   startAuthentication,
   startRegistration,
@@ -68,6 +69,16 @@ import {
   sanitizeWebAuthnResponseForServer,
 } from "@/lib/crypto-client/vault-passkey-browser";
 import type { EncryptedPayload as VaultCoreEncryptedPayload } from "@tgoliveira/vault-core";
+import {
+  assertVaultSessionLeaseCurrent,
+  assertVaultSessionOperationCurrent,
+  VaultSessionOperationCancelledError,
+} from "@tgoliveira/vault-core/browser";
+import {
+  beginVaultOwnerOperation,
+  getCurrentVaultSessionLease,
+} from "@/lib/crypto-client/vault-session";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
 
 type VaultUnlockPasskey = {
   id: string;
@@ -152,9 +163,9 @@ export function PasskeyVaultUnlockSetup({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [diagnosticReason, setDiagnosticReason] = useState<PasskeyPrfDiagnosticReason | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
-  const loadPasskeys = useCallback(async () => {
-    const data = await fetchVaultPasskeyData();
+  const commitPasskeyData = useCallback((data: Awaited<ReturnType<typeof fetchVaultPasskeyData>>) => {
     setPasskeys(data.passkeys);
     setDeviceBindings(data.deviceBindings);
     setCurrentDeviceCredentialId(data.currentDeviceCredentialId);
@@ -162,26 +173,46 @@ export function PasskeyVaultUnlockSetup({
     setServerPasskeyEnvelope(data.serverPasskeyEnvelope);
   }, []);
 
+  const loadPasskeys = useCallback(async () => {
+    const ownership = ownershipRef.current.capture({
+      ownerId: userId,
+      leaseEpoch: 0,
+      resourceId: "vault-passkeys",
+    });
+    const data = await fetchVaultPasskeyData();
+    ownershipRef.current.assertCurrent(ownership);
+    commitPasskeyData(data);
+  }, [commitPasskeyData, userId]);
+
   useEffect(() => {
-    let cancelled = false;
+    const controller = ownershipRef.current;
+    const ownership = controller.capture({
+      ownerId: userId,
+      leaseEpoch: 0,
+      resourceId: "vault-passkeys:initial",
+    });
     Promise.all([fetchVaultPasskeyData(), probePasskeyPrfEnvironmentAsync()])
       .then(([data, env]) => {
-        if (!cancelled) {
-          setPasskeys(data.passkeys);
-          setDeviceBindings(data.deviceBindings);
-          setCurrentDeviceCredentialId(data.currentDeviceCredentialId);
-          setPasskeyUnlockAvailableOnThisDevice(data.passkeyUnlockAvailableOnThisDevice);
-          setServerPasskeyEnvelope(data.serverPasskeyEnvelope);
-          setEnvironment(env);
-        }
+        ownershipRef.current.assertCurrent(ownership);
+        commitPasskeyData(data);
+        setEnvironment(env);
       })
-      .catch(() => {
-        if (!cancelled) setPasskeys([]);
+      .catch((cause: unknown) => {
+        if (!isAsyncOwnershipCancellation(cause)) setError("Could not load vault passkeys.");
       });
     return () => {
-      cancelled = true;
+      controller.invalidate();
     };
-  }, []);
+  }, [commitPasskeyData, userId]);
+
+  useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
+    setPasskeys([]);
+    setDeviceBindings([]);
+    setCurrentDeviceCredentialId(undefined);
+    setPasskeyUnlockAvailableOnThisDevice(false);
+    setServerPasskeyEnvelope(false);
+  });
 
   const availability = useMemo(
     (): VaultPasskeyAvailability =>
@@ -227,11 +258,13 @@ export function PasskeyVaultUnlockSetup({
     expectedCredentialId: string,
     vaultKey: CryptoKey
   ) {
+    const operation = beginVaultOwnerOperation(userId);
     const enablePath = `/api/account/passkeys/${credentialDbId}/enable-vault-unlock`;
     const enableOptions = (await apiClient.post(enablePath, {
       action: "options",
     })) as PublicKeyCredentialRequestOptionsJSON;
     const assertion = await runCeremonyWithOptions(enableOptions);
+    assertVaultSessionOperationCurrent(operation);
     const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
     const enrollment = await apiClient.post<{
       verified: true;
@@ -241,6 +274,7 @@ export function PasskeyVaultUnlockSetup({
       action: "verify",
       response: sanitizeWebAuthnResponseForServer(assertion),
     });
+    assertVaultSessionOperationCurrent(operation);
     if (
       enrollment.verifiedCredentialId !== assertion.id ||
       enrollment.verifiedCredentialId !== expectedCredentialId
@@ -268,8 +302,10 @@ export function PasskeyVaultUnlockSetup({
       vaultKey,
       prfOutput,
       userId,
-      userId
+      userId,
+      operation
     );
+    assertVaultSessionOperationCurrent(operation);
     const persisted = await apiClient.post<{
       verifiedCredentialId: string;
       envelopeVariantId: string;
@@ -280,6 +316,7 @@ export function PasskeyVaultUnlockSetup({
       encryptedVaultKey,
       prfSupported: true,
     });
+    assertVaultSessionOperationCurrent(operation);
     if (persisted.verifiedCredentialId !== expectedCredentialId) {
       throw new Error("Persisted passkey credential mismatch.");
     }
@@ -304,7 +341,9 @@ export function PasskeyVaultUnlockSetup({
       prfOutput,
       applySession: false,
       cacheInnerKey: false,
+      operation,
     });
+    assertVaultSessionOperationCurrent(operation);
     if (localMatch.status !== "matched") {
       throw new Error("The new passkey envelope could not be verified locally.");
     }
@@ -314,6 +353,7 @@ export function PasskeyVaultUnlockSetup({
       selectedEnvelopeVariantId: localMatch.envelopeVariantId,
       deviceLabel: currentDeviceLabel(),
     });
+    assertVaultSessionOperationCurrent(operation);
     return localMatch.envelopeVariantId;
   }
 
@@ -602,16 +642,20 @@ export function PasskeyVaultUnlockSetup({
     setDiagnosticReason(null);
 
     try {
-      if (!getSessionVaultKey()) {
+      const lease = getCurrentVaultSessionLease(userId);
+      if (!getSessionVaultKey() || !lease) {
         throw new Error("Unlock your vault before removing all vault passkeys.");
       }
       await passkeysApi.removeAllVaultUnlock();
+      assertVaultSessionLeaseCurrent(lease);
       setMessage(
         "Passkey vault unlock was removed from every passkey and browser. Account sign-in passkeys were preserved."
       );
       await loadPasskeys();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not remove all vault passkeys.");
+      if (!(e instanceof VaultSessionOperationCancelledError)) {
+        setError(e instanceof Error ? e.message : "Could not remove all vault passkeys.");
+      }
     } finally {
       setLoadingId(null);
       setRemoveAllOpen(false);

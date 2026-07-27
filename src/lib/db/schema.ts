@@ -15,6 +15,7 @@ export {
   inviteCodes,
   inviteUses,
   loginAttemptCounters,
+  userPreferences,
 } from "@tgoliveira/secure-auth/drizzle/schema";
 
 export {

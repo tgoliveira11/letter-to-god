@@ -272,6 +272,10 @@ Validation: `rejectVaultPlaintextFields()` in `src/lib/validation/vault.ts`; `re
 - Phase 2 adds Note Keys wrapped by UVK (`notes` table, `/api/notes`, vault index).
 - Phase 3 extends vault index v2 with encrypted categories, tags, answered flags; client-only search; `unlockBehavior` in encrypted vault settings. Letters domain removed.
 
+### Deterministic owner and lease lifecycle (2026-07-27)
+
+Every UVK-producing path is scoped to a `@tgoliveira/vault-core` owner operation; every subsequent key-bearing private operation uses the installed vault lease. Awaited work must reassert the operation or lease before installing key state, writing ciphertext, or committing decrypted UI/cache state. Lock changes the epoch; logout and account replacement clear the owner. Late results are discarded under the additional app request-generation contract in [`TDR_DETERMINISTIC_APPLICATION_STATE.md`](./TDR_DETERMINISTIC_APPLICATION_STATE.md).
+
 ```text
 TODO_SECURITY_REVIEW_REQUIRED:
 Production migration from vault-v1 + recovery_code to vault-v2 + recovery_phrase requires a human-reviewed data migration plan before bulk user conversion.

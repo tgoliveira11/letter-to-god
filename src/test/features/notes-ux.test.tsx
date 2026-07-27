@@ -1,6 +1,11 @@
-import { lockVaultSession, unlockVaultSession } from "@/lib/crypto-client/vault-session";
+import {
+  beginVaultOwnerOperation,
+  lockVaultSession,
+  unlockVaultSession,
+} from "@/lib/crypto-client/vault-session";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import userEvent from "@testing-library/user-event";
 import NotesPage from "@/app/(vault)/notes/page";
 import NewNotePage from "@/app/(vault)/notes/new/page";
@@ -10,6 +15,10 @@ import { NoteCategoryLabel, NoteTagChip } from "@/components/notes/note-labels";
 import { hasNoteOrganizers, NoteFilters } from "@/features/notes/note-filters";
 import { encryptNote } from "@/lib/crypto-client/notes";import { generateUserVaultKey } from "@/lib/crypto-client/vault";
 import { USER_ID, NOTE_ID } from "@/test/helpers/fixtures";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: { user: { id: USER_ID } }, status: "authenticated" })),
+}));
 
 const routerPush = vi.fn();
 
@@ -153,6 +162,11 @@ function setNoteBody(value: string) {
 describe("notes UX", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    await unlockVaultSession(
+      await generateUserVaultKey(),
+      "password",
+      beginVaultOwnerOperation(USER_ID)
+    );
 
     const { useRequireVault } = await import("@/features/vault/use-require-vault");
     const { useVaultClientStatus } = await import("@/features/vault/use-vault-client-status");
@@ -476,7 +490,7 @@ describe("notes UX", () => {
 
     it("still sends encrypted payload only when saving", async () => {
       const vaultKey = await generateUserVaultKey();
-      await unlockVaultSession(vaultKey);
+      await unlockVaultSession(vaultKey, "password", beginVaultOwnerOperation(USER_ID));
       const encrypted = await encryptNote(USER_ID, NOTE_ID, {
         title: "Encrypted title",
         body: "Encrypted body",

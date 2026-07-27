@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { signOutAccount, signOutWithRedirect } from "@/lib/auth/sign-out-client";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import { useId, useState } from "react";
@@ -18,9 +17,10 @@ import { cn } from "@/lib/ui/cn";
 import { PRODUCT_NAME } from "@/lib/marketing/brand";
 import { VaultStatusDock } from "@/features/vault/vault-status-dock";
 import { HeaderSearch } from "@/components/layout/header-search";
+import { useApplicationState } from "@/components/application-state-provider";
 
 export function Nav() {
-  const { data: session } = useSession();
+  const { session } = useApplicationState();
   const authenticated = isFullyAuthenticatedSession(session);
   const pathname = usePathname();
   const menuId = useId();

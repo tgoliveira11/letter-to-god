@@ -11,6 +11,7 @@ Phases 0–5 of the MVP are **complete**. The active implementation domain is **
 | Document | Purpose |
 |----------|---------|
 | [`TDR_LTG_Vault_MVP.md`](./TDR_LTG_Vault_MVP.md) | Product and architecture direction |
+| [`TDR_DETERMINISTIC_APPLICATION_STATE.md`](./TDR_DETERMINISTIC_APPLICATION_STATE.md) | Server bootstrap, owner boundaries, vault leases, async ownership, and extraction decision |
 | [`TDR_Note_Version_History.md`](./TDR_Note_Version_History.md) | Encrypted note version history + GitHub-style compare |
 | [`TDR_Local_Voice_Notes.md`](./TDR_Local_Voice_Notes.md) | On-device voice-to-text note creation (EN/PT/ES) |
 | [`LTG_VAULT_IMPLEMENTATION_PLAN.md`](./LTG_VAULT_IMPLEMENTATION_PLAN.md) | Phased engineering plan (completed) |

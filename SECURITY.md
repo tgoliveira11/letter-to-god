@@ -20,6 +20,10 @@
 10. Frontend must not access database directly.
 11. Account authentication from `@tgoliveira/secure-auth` only — no competing local auth.
 12. Account session does not unlock the vault.
+13. A private async result may commit only for its current account owner, vault lease epoch, resource, encrypted-key identity, and request generation.
+14. Account replacement/logout synchronously removes prior-owner private DOM and caches and invalidates vault operations/leases before refresh.
+
+The normative state and ownership model is [`docs/TDR_DETERMINISTIC_APPLICATION_STATE.md`](./docs/TDR_DETERMINISTIC_APPLICATION_STATE.md).
 
 ## Cryptography (ADR-005)
 
@@ -28,12 +32,15 @@
 - **AAD binding (server + client):** `aad.userId` must match session user; `aad.resourceId` must match persisted note/vault id; `aad.field` must match the encrypted field.
 - **Note IDs:** client generates UUID; server persists the same id.
 - **vault password KDF (new setups):** Argon2id only via `@tgoliveira/vault-core` / `hash-wasm` — no PBKDF2 fallback (ADR-005; `src/modules/vault/core/envelopes/password-envelope.ts`)
+- **Vault password KDF upgrade:** after client unlock, a current vault lease is required before the browser sends a strengthened ciphertext envelope to `PUT /api/vault/password-envelope`; the server validates AAD/Argon2id and atomically replaces the prior envelope under a transaction lock. No password or UVK is transmitted.
 - **Vault password policy (setup UI):** `VAULT_PASSWORD_*` env vars mapped in `src/lib/config/vault-password-policy.ts` and passed explicitly to `PasswordSetupFields` on `/vault/setup`. Separate from account `AUTH_PASSWORD_*` policy. Vault password never leaves the browser.
 - **recovery phrase (new setups):** BIP39 English, 12 or 24 words (`src/modules/vault/core/envelopes/recovery-envelope.ts`, shim: `src/lib/crypto-client/recovery-phrase.ts`). Setup uses client-side `.txt` download and randomized word-position confirmation before vault creation (`docs/VAULT_SETUP_RECOVERY_PHRASE_CONFIRMATION.md`).
 - **Legacy recovery code KDF:** Argon2id preferred; PBKDF2-SHA-256 fallback (600k iterations) with versioned `kdf-v1` metadata — legacy `recovery_code` envelopes only
 - Recovery codes: ≥128 bits entropy (project-specific wordlist, not BIP39; currently 17 words from 252 unique words ≈ 135.6 bits); uniform word selection + rejection sampling; shown only at generation/regeneration; never stored plaintext
 
 ## Vault Unlocking (ADR-005 / ADR-006)
+
+All unlock, setup, recovery, and passkey mutations begin a vault-core owner operation. Successful unlock installs a lease-bound epoch; lock, logout, or account replacement invalidates it. Private consumers assert both their last-request-wins ownership token and the current lease after asynchronous work and before committing plaintext-derived state or ciphertext writes.
 
 Supported unlock methods: **vault password**, **recovery phrase**, **passkey PRF** (`passkey_authorized_device` envelope). Legacy `recovery_code` envelopes remain for older vaults.
 
@@ -187,11 +194,11 @@ Plaintext passwords are redacted from logs (`safeLogger`) and blocked from audit
 
 These flows protect **account authentication only**. They do **not** unlock, recover, rotate, or decrypt the private letters vault. User-facing copy states this on reset and change-password screens.
 
-**Account authentication** is implemented by `@tgoliveira/secure-auth@0.5.1` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
+**Account authentication** is implemented by `@tgoliveira/secure-auth@0.7.0` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
 **Admin platform (0.4.1+)** — when `AUTH_ADMIN_ENABLED=true`, `/admin` and `/api/auth/admin/*` are served by the package. Unauthenticated users are redirected to login by `src/proxy.ts`; **role checks (`admin` vs `user`) are enforced in package API handlers**, not in the proxy. Bootstrap: set `ADMIN_BOOTSTRAP_EMAIL` to promote the first admin when none exists. This admin surface manages **accounts only** — it does not access vault keys or decrypted note content. App-specific `/api/admin/users/[id]` remains separate (self-summary only).
 
-**secure-auth 0.5.0 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
+**secure-auth 0.7.0 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
 
 **Package API security (0.1.21+)** — enforced inside `@tgoliveira/secure-auth` route handlers, not only in app middleware:
 

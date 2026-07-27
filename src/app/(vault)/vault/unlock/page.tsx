@@ -1,12 +1,10 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import {
   VaultUnlockPanel,
   useVaultUnlockPageNavigation,
 } from "@tgoliveira/vault-core/react";
-import { isPrfExtensionSupported } from "@tgoliveira/vault-core/browser";
 import { Alert } from "@/components/ui/alert";
 import { PageLayout } from "@/components/layout/page-layout";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -22,13 +20,16 @@ import { getVaultUnlockRateLimiter } from "@/lib/vault/vault-rate-limit";
 import { toVaultServerStatusSnapshot } from "@/lib/vault/vault-server-snapshot";
 import { PRODUCT_NAME } from "@/lib/marketing/brand";
 import { LegacyVaultUnlockPanel } from "@/features/vault/legacy-vault-unlock-panel";
+import { useBrowserCapabilities } from "@/components/browser-capabilities-provider";
+import { useApplicationState } from "@/components/application-state-provider";
 
 export default function VaultUnlockPage() {
-  const { status: authStatus, data: session } = useSession();
+  const application = useApplicationState();
   const router = useRouter();
   const searchParams = useSearchParams();
   const afterUnlockPath = readSelahkeepVaultUnlockReturnPath(searchParams);
   const vaultClient = useVaultClientStatus();
+  const capabilities = useBrowserCapabilities();
   const {
     loading,
     error,
@@ -40,9 +41,9 @@ export default function VaultUnlockPage() {
   const serverStatusForPasskey = vaultClient.status === "ready" ? vaultClient.serverStatus : null;
   const passkeyAvailability = useVaultDockPasskeyAvailable(serverStatusForPasskey);
   const { prefetch, refresh } = useVaultPasskeyUnlockPrefetch(
-    authStatus === "authenticated" && passkeyAvailability.showPasskey
+    Boolean(application.ownerId) && passkeyAvailability.showPasskey
   );
-  const rateLimitScopeKey = session?.user?.id ?? "vault";
+  const rateLimitScopeKey = application.ownerId ?? "vault";
 
   const configured =
     vaultClient.status === "ready"
@@ -57,7 +58,11 @@ export default function VaultUnlockPage() {
     onNavigate: (path) => router.replace(path),
   });
 
-  if (authStatus === "loading" || authStatus === "unauthenticated" || vaultClient.status === "loading") {
+  if (
+    !application.ownerId ||
+    vaultClient.status === "loading" ||
+    capabilities.passkeyPrf.status === "checking"
+  ) {
     return (
       <PageLayout width="narrow">
         <LoadingState label="Loading your vault" />
@@ -99,7 +104,7 @@ export default function VaultUnlockPage() {
           loading={loading}
           error={error}
           serverStatus={snapshot}
-          prfSupported={isPrfExtensionSupported()}
+          prfSupported={capabilities.passkeyPrf.status === "supported"}
           passkeyReady={passkeyAvailability.showPasskey}
           unlockRateLimiter={rateLimiter}
           rateLimitScopeKey={rateLimitScopeKey}

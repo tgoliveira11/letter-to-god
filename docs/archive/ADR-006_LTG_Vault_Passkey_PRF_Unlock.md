@@ -1,5 +1,7 @@
 > **⚠️ ARCHIVED — obsolete (2026-07-03).** Superseded by `@tgoliveira/vault-core` as the single source of truth for vault and passkey PRF unlock behavior. See the package's `README.md`, `docs/IMPLEMENTATION_GUIDE.md`, and `PASSKEY_PRF_ENVELOPES.md`. Kept for historical context only — do not use for current implementation guidance.
 
+> Current SelahKeep ceremonies are owner-operation and lease scoped under `@tgoliveira/vault-core@1.5.1`; see [`../TDR_DETERMINISTIC_APPLICATION_STATE.md`](../TDR_DETERMINISTIC_APPLICATION_STATE.md). This note does not reactivate the archived design.
+
 ---
 
 # ADR-006 — SelahKeep Passkey PRF Unlock

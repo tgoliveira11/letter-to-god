@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import { SiteShell } from "@/components/layout/site-shell";
 import { PageLayout } from "@/components/layout/page-layout";
 import { AuthenticatedPage } from "@/components/layout/authenticated-page";
@@ -11,13 +10,12 @@ import {
   isFullyAuthenticatedSession,
   isPendingTwoFactorSession,
 } from "@/lib/auth/session-state";
+import { useApplicationState } from "@/components/application-state-provider";
 
 function NotFoundActions({ variant }: { variant: "page" | "note" }) {
-  const { data: session, status } = useSession();
-  const fullyAuthenticated =
-    status === "authenticated" && isFullyAuthenticatedSession(session);
-  const pendingTwoFactor =
-    status === "authenticated" && isPendingTwoFactorSession(session);
+  const { session } = useApplicationState();
+  const fullyAuthenticated = isFullyAuthenticatedSession(session);
+  const pendingTwoFactor = isPendingTwoFactorSession(session);
 
   if (fullyAuthenticated) {
     if (variant === "note") {

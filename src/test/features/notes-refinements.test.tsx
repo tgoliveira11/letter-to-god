@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import NewNotePage from "@/app/(vault)/notes/new/page";
 import NotesPage from "@/app/(vault)/notes/page";
 import { saveEncryptedNoteDraft } from "@/lib/crypto-client/note-drafts";

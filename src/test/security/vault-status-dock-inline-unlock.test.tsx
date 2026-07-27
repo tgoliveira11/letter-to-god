@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { VaultStatusDock } from "@/features/vault/vault-status-dock";
 
 const unlockFromVaultPassword = vi.fn();

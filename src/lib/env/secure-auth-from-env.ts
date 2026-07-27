@@ -30,6 +30,7 @@ export type SecureAuthEnvSlice = Pick<
   | "invites"
   | "apiKeys"
   | "profile"
+  | "preferences"
 >;
 
 function readCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
@@ -510,6 +511,9 @@ export function buildSecureAuthConfigFromEnv(
     },
     profile: {
       enabled: profileEnabled,
+    },
+    preferences: {
+      enabled: true,
     },
   };
 }

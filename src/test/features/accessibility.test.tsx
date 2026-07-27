@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { axe } from "jest-axe";
 import { SecureAuthUIProvider } from "@tgoliveira/secure-auth/react";
 import HomePage from "@/app/(public)/page";

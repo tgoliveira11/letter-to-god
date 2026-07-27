@@ -1,4 +1,8 @@
-import { lockVaultSession, unlockVaultSession } from "@/lib/crypto-client/vault-session";
+import {
+  beginVaultOwnerOperation,
+  lockVaultSession,
+  unlockVaultSession,
+} from "@/lib/crypto-client/vault-session";
 /** @vitest-environment happy-dom */
 import { describe, it, expect, vi, beforeEach } from "vitest";import { generateUserVaultKey } from "@/lib/crypto-client/vault";
 import {
@@ -41,7 +45,7 @@ describe("encrypted note drafts", () => {
     store.clear();
     resetNoteDraftDbForTests();
     const key = await generateUserVaultKey();
-    await unlockVaultSession(key);
+    await unlockVaultSession(key, "password", beginVaultOwnerOperation(USER_ID));
   });
 
   it("stores and loads encrypted drafts", async () => {
@@ -84,7 +88,11 @@ describe("encrypted note drafts", () => {
     };
     await saveEncryptedNoteDraft(USER_ID, NEW_NOTE_DRAFT_KEY, draft);
     await saveEncryptedNoteDraft(USER_ID, "note-2", draft);
-    await saveEncryptedNoteDraft(otherUser, NEW_NOTE_DRAFT_KEY, draft);
+    const currentRecord = store.get(`${USER_ID}:${NEW_NOTE_DRAFT_KEY}`) as Record<string, unknown>;
+    store.set(`${otherUser}:${NEW_NOTE_DRAFT_KEY}`, {
+      ...currentRecord,
+      userId: otherUser,
+    });
 
     expect(await listEncryptedNoteDraftKeys(USER_ID)).toEqual(
       expect.arrayContaining([NEW_NOTE_DRAFT_KEY, "note-2"])

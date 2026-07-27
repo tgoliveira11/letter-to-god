@@ -2,7 +2,6 @@
 
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { useCallback, useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
 import {
   maybeUpgradePasswordEnvelopeAfterUnlock,
   maybeUpgradeRecoveryEnvelopeAfterUnlock,
@@ -12,9 +11,16 @@ import {
 import { unwrapVaultKeyFromRecovery } from "@/lib/crypto-client/vault";
 import {
   hasUnlockedVaultSession,
+  beginVaultOwnerOperation,
+  getCurrentVaultSessionLease,
   lockVaultSessionManually,
   registerVaultUnloadGuard,
 } from "@/lib/crypto-client/vault-session";
+import {
+  assertVaultSessionLeaseCurrent,
+  isVaultSessionOperationCurrent,
+  VaultSessionOperationCancelledError,
+} from "@tgoliveira/vault-core/browser";
 import { vaultApi } from "@/lib/api-client/vault";
 import { unlockVaultWithPasskey } from "@/features/passkey/unlock-with-passkey";
 import { recordVaultSecurityEvent } from "@/features/vault/record-vault-security-event";
@@ -26,13 +32,13 @@ import type { KdfMetadata, EncryptedPayload } from "@/lib/validation/encrypted-p
 import { getVaultUnlockRateLimiter } from "@/lib/vault/vault-rate-limit";
 import { envelopeScope } from "@/lib/vault/vault-envelope-scope";
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
+import { useApplicationState } from "@/components/application-state-provider";
 
 export function useVault() {
-  const { data: session } = useSession();
+  const { ownerId: userId } = useApplicationState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const unlockLimiter = getVaultUnlockRateLimiter();
-  const userId = session?.user?.id;
 
   useEffect(() => {
     return registerVaultUnloadGuard();
@@ -48,19 +54,25 @@ export function useVault() {
       credentialId?: string
     ) => {
       if (!userId) throw new Error("Not authenticated");
+      const operation = beginVaultOwnerOperation(userId);
       setLoading(true);
       setError(null);
       try {
         const key = await withVaultUnlockRateLimit(unlockLimiter, userId, "passkey_prf", async () =>
-          unlockVaultWithPasskey(userId, credentialId, prefetchedOptions)
+          unlockVaultWithPasskey(userId, credentialId, prefetchedOptions, operation)
         );
+        const lease = getCurrentVaultSessionLease(userId);
+        if (!lease) throw new VaultSessionOperationCancelledError("stale_operation");
+        assertVaultSessionLeaseCurrent(lease);
         void recordVaultSecurityEvent("vault_unlocked", { method: "passkey_prf" });
         return key;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Passkey unlock failed");
+        if (!(e instanceof VaultSessionOperationCancelledError)) {
+          setError(e instanceof Error ? e.message : "Passkey unlock failed");
+        }
         throw e;
       } finally {
-        setLoading(false);
+        if (isVaultSessionOperationCurrent(operation)) setLoading(false);
       }
     },
     [unlockLimiter, userId]
@@ -69,6 +81,7 @@ export function useVault() {
   const unlockFromRecoveryCode = useCallback(
     async (recoveryCode: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const operation = beginVaultOwnerOperation(userId);
       setLoading(true);
       setError(null);
       try {
@@ -79,13 +92,16 @@ export function useVault() {
           }
           await unwrapVaultKeyFromRecovery(recoveryCode, encryptedVaultKey, kdfMetadata, {
             applySession: true,
+            operation,
           });
         });
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Recovery unlock failed");
+        if (!(e instanceof VaultSessionOperationCancelledError)) {
+          setError(e instanceof Error ? e.message : "Recovery unlock failed");
+        }
         throw e;
       } finally {
-        setLoading(false);
+        if (isVaultSessionOperationCurrent(operation)) setLoading(false);
       }
     },
     [unlockLimiter, userId]
@@ -94,6 +110,7 @@ export function useVault() {
   const unlockFromVaultPassword = useCallback(
     async (vaultPassword: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const operation = beginVaultOwnerOperation(userId);
       setLoading(true);
       setError(null);
       try {
@@ -111,8 +128,11 @@ export function useVault() {
               applySession: true,
               unlockMethod: "password",
               userId,
+              operation,
             }
           );
+          const lease = getCurrentVaultSessionLease(userId);
+          if (!lease) throw new VaultSessionOperationCancelledError("stale_operation");
           const upgrade = await maybeUpgradePasswordEnvelopeAfterUnlock({
             vaultKey: key,
             vaultPassword,
@@ -123,16 +143,26 @@ export function useVault() {
             scope,
             profile: SELAHKEEP_VAULT_PROFILE,
           });
-          void upgrade;
+          assertVaultSessionLeaseCurrent(lease);
+          if (upgrade.upgradedEnvelope) {
+            await vaultApi.replacePasswordEnvelope({
+              encryptedVaultKey: upgrade.upgradedEnvelope
+                .encryptedVaultKey as EncryptedPayload,
+              kdfMetadata: upgrade.upgradedEnvelope.kdfMetadata as KdfMetadata,
+            });
+            assertVaultSessionLeaseCurrent(lease);
+          }
           return key;
         });
         void recordVaultSecurityEvent("vault_unlocked", { method: "password" });
         return vaultKey;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Vault password unlock failed");
+        if (!(e instanceof VaultSessionOperationCancelledError)) {
+          setError(e instanceof Error ? e.message : "Vault password unlock failed");
+        }
         throw e;
       } finally {
-        setLoading(false);
+        if (isVaultSessionOperationCurrent(operation)) setLoading(false);
       }
     },
     [unlockLimiter, userId]
@@ -141,6 +171,7 @@ export function useVault() {
   const unlockFromRecoveryPhrase = useCallback(
     async (recoveryPhrase: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const operation = beginVaultOwnerOperation(userId);
       setLoading(true);
       setError(null);
       try {
@@ -167,8 +198,11 @@ export function useVault() {
                   publicMetadata?.phraseLength === 12 || publicMetadata?.phraseLength === 24
                     ? publicMetadata.phraseLength
                     : undefined,
+                operation,
               }
             );
+            const lease = getCurrentVaultSessionLease(userId);
+            if (!lease) throw new VaultSessionOperationCancelledError("stale_operation");
             const upgrade = await maybeUpgradeRecoveryEnvelopeAfterUnlock({
               vaultKey: key,
               recoveryPhrase,
@@ -180,6 +214,7 @@ export function useVault() {
               scope,
               profile: SELAHKEEP_VAULT_PROFILE,
             });
+            assertVaultSessionLeaseCurrent(lease);
             if (upgrade.upgradedEnvelope) {
               await vaultApi.replaceRecoveryPhrase({
                 encryptedVaultKey: upgrade.upgradedEnvelope
@@ -189,6 +224,7 @@ export function useVault() {
                   | { phraseLength: 12 | 24 }
                   | undefined,
               });
+              assertVaultSessionLeaseCurrent(lease);
             }
             return key;
           }
@@ -196,10 +232,12 @@ export function useVault() {
         void recordVaultSecurityEvent("vault_unlocked", { method: "recovery_phrase" });
         return vaultKey;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Recovery phrase unlock failed");
+        if (!(e instanceof VaultSessionOperationCancelledError)) {
+          setError(e instanceof Error ? e.message : "Recovery phrase unlock failed");
+        }
         throw e;
       } finally {
-        setLoading(false);
+        if (isVaultSessionOperationCurrent(operation)) setLoading(false);
       }
     },
     [unlockLimiter, userId]

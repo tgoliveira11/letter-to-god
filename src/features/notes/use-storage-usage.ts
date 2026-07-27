@@ -1,31 +1,63 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { storageUsageApi, type StorageUsageResponse } from "@/lib/api-client/note-attachments";
+import { useApplicationState } from "@/components/application-state-provider";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 export function useStorageUsage(enabled: boolean) {
+  const { ownerId } = useApplicationState();
   const [usage, setUsage] = useState<StorageUsageResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   const reload = useCallback(async () => {
-    if (!enabled) return;
+    if (!enabled || !ownerId) return;
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: "storage-usage",
+    });
     setLoading(true);
     setError(null);
     try {
       const data = await storageUsageApi.get();
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setUsage(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load storage usage");
-      setUsage(null);
+      if (!isAsyncOwnershipCancellation(e)) {
+        setError(e instanceof Error ? e.message : "Failed to load storage usage");
+        setUsage(null);
+      }
     } finally {
-      setLoading(false);
+      if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, ownerId]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (!enabled || !ownerId) {
+      ownershipRef.current.invalidate();
+      setUsage(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    void reload().catch((cause: unknown) => {
+      if (!isAsyncOwnershipCancellation(cause)) {
+        setError(cause instanceof Error ? cause.message : "Failed to load storage usage");
+      }
+      setLoading(false);
+    });
+  }, [enabled, ownerId, reload]);
+
+  useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
+    setUsage(null);
+    setLoading(false);
+    setError(null);
+  });
 
   return { usage, loading, error, reload };
 }

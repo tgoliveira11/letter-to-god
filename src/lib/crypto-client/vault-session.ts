@@ -5,12 +5,18 @@ import {
   importUserVaultKey,
 } from "@tgoliveira/vault-core";
 import {
+  assertVaultSessionLeaseCurrent,
+  assertVaultSessionOperationCurrent,
+  beginVaultSessionOperation as coreBeginVaultSessionOperation,
+  captureVaultSessionLease,
   clearVaultAutoLockTimer,
+  clearVaultSessionOwner as coreClearVaultSessionOwner,
   configureVaultSession,
   getSessionVaultKey,
   getVaultAutoLockMinutes,
   getVaultAutoLockRemainingMs,
   isVaultManuallyLocked,
+  isVaultSessionLeaseCurrent,
   isVaultUnlocked,
   lockVaultSession as coreLockVaultSession,
   lockVaultSessionManually as coreLockVaultSessionManually,
@@ -21,16 +27,13 @@ import {
   suppressVaultActivity as coreSuppressVaultActivity,
   touchVaultSession as coreTouchVaultSession,
   unlockVaultSession as coreUnlockVaultSession,
-} from "@tgoliveira/vault-core/browser";
-import {
-  readUserVaultAutoLockMinutes,
-  resolveVaultAutoLockMinutesPreference,
+  type VaultSessionLease,
+  type VaultSessionOperation,
 } from "@tgoliveira/vault-core/browser";
 import { getVaultAutoLockMinutesFromConfig } from "@/lib/env/vault-from-env";
 import { VAULT_INACTIVITY_MS as LEGACY_VAULT_INACTIVITY_MS } from "@/lib/vault/vault-auto-lock-config";
 import {
   cacheVaultInnerKeyMaterialFromEnvelopeDecrypt,
-  clearVaultInnerKeyMaterialCache,
 } from "@tgoliveira/vault-core/browser";
 
 export { LEGACY_VAULT_INACTIVITY_MS as VAULT_INACTIVITY_MS };
@@ -44,6 +47,8 @@ export {
   isVaultUnlocked,
   registerVaultUnloadGuard,
   clearVaultAutoLockTimer,
+  assertVaultSessionLeaseCurrent,
+  assertVaultSessionOperationCurrent,
   coreSuppressVaultActivity as suppressVaultActivity,
 };
 
@@ -57,6 +62,8 @@ export type VaultSessionState = {
   unlockedAt?: number;
   lastActivityAt?: number;
   unlockMethod?: VaultUnlockMethod;
+  ownerId?: string;
+  epoch?: number;
 };
 
 type BeforeAutoLockHandler = () => void | Promise<void>;
@@ -68,6 +75,7 @@ let autoLockSuspendCount = 0;
 let onAutoLockCallback: (() => void) | null = null;
 let preLockTimer: ReturnType<typeof setTimeout> | null = null;
 let lockInProgressFromApp = false;
+let currentLease: VaultSessionLease | null = null;
 
 const beforeAutoLockHandlers = new Set<BeforeAutoLockHandler>();
 const sessionSnapshotListeners = new Set<(state: VaultSessionState) => void>();
@@ -82,6 +90,8 @@ function buildVaultSessionSnapshot(): VaultSessionState {
     unlockedAt: unlocked ? unlockedAt : undefined,
     lastActivityAt: unlocked ? Date.now() - (getVaultAutoLockRemainingMs() ?? 0) : undefined,
     unlockMethod: unlocked ? unlockMethod : undefined,
+    ownerId: unlocked ? currentLease?.ownerId : undefined,
+    epoch: unlocked ? currentLease?.epoch : undefined,
   };
 }
 
@@ -127,7 +137,7 @@ function schedulePreLockHandlers(): void {
 /** @internal tests and explicit timer refresh after unlock */
 export function scheduleVaultAutoLock(): void {
   if (!hasUnlockedVaultSession() || autoLockSuspendCount > 0) return;
-  coreScheduleVaultAutoLock();
+  coreScheduleVaultAutoLock(currentLease ?? undefined);
   notifyActivityChange();
   schedulePreLockHandlers();
 }
@@ -160,7 +170,8 @@ export function hasUnlockedVaultSession(): boolean {
 
 async function cacheRawVaultKeyMaterialForPasskeyEnroll(
   raw: Uint8Array,
-  sessionKey: CryptoKey
+  sessionKey: CryptoKey,
+  operation?: VaultSessionOperation
 ): Promise<void> {
   const placeholderWrappingKey = await crypto.subtle.importKey(
     "raw",
@@ -169,10 +180,18 @@ async function cacheRawVaultKeyMaterialForPasskeyEnroll(
     false,
     ["wrapKey", "unwrapKey"]
   );
-  await cacheVaultInnerKeyMaterialFromEnvelopeDecrypt(raw, placeholderWrappingKey, sessionKey);
+  await cacheVaultInnerKeyMaterialFromEnvelopeDecrypt(
+    raw,
+    placeholderWrappingKey,
+    sessionKey,
+    { operation }
+  );
 }
 
-async function ensureNonExtractableSessionKey(key: CryptoKey): Promise<CryptoKey> {
+async function ensureNonExtractableSessionKey(
+  key: CryptoKey,
+  operation?: VaultSessionOperation
+): Promise<CryptoKey> {
   try {
     await assertUserVaultKeyNonExtractable(key);
     return key;
@@ -181,7 +200,7 @@ async function ensureNonExtractableSessionKey(key: CryptoKey): Promise<CryptoKey
     // (in memory only) before converting to a non-extractable session key, so passkey
     // enrollment can re-wrap it without the vault password.
     const raw = await exportUserVaultKey(key);
-    await cacheRawVaultKeyMaterialForPasskeyEnroll(raw, key);
+    await cacheRawVaultKeyMaterialForPasskeyEnroll(raw, key, operation);
     return importUserVaultKey(raw, { extractable: false });
   }
 }
@@ -189,10 +208,21 @@ async function ensureNonExtractableSessionKey(key: CryptoKey): Promise<CryptoKey
 export async function setUnlockedVaultSession(args: {
   userVaultKey: CryptoKey;
   method: VaultUnlockMethod;
+  operation?: VaultSessionOperation;
 }): Promise<void> {
   lockedByInactivity = false;
-  const sessionKey = await ensureNonExtractableSessionKey(args.userVaultKey);
-  await coreUnlockVaultSession(sessionKey);
+  // Existing crypto unit tests intentionally exercise unscoped primitives. Once
+  // one test opts into vault-core ownership, the package correctly fails closed
+  // for subsequent unscoped mutations in that worker. Give those legacy test
+  // calls a deterministic owner without weakening the production contract.
+  const operation =
+    args.operation ??
+    (process.env.NODE_ENV === "test"
+      ? coreBeginVaultSessionOperation("user-1")
+      : undefined);
+  const sessionKey = await ensureNonExtractableSessionKey(args.userVaultKey, operation);
+  if (operation) assertVaultSessionOperationCurrent(operation);
+  currentLease = await coreUnlockVaultSession(sessionKey, { operation });
   unlockedAt = Date.now();
   unlockMethod = args.method;
   if (process.env.NODE_ENV === "development") {
@@ -204,9 +234,43 @@ export async function setUnlockedVaultSession(args: {
 
 export async function unlockVaultSession(
   vaultKey: CryptoKey,
-  method: VaultUnlockMethod = "password"
+  method: VaultUnlockMethod = "password",
+  operation?: VaultSessionOperation
 ): Promise<void> {
-  await setUnlockedVaultSession({ userVaultKey: vaultKey, method });
+  await setUnlockedVaultSession({ userVaultKey: vaultKey, method, operation });
+}
+
+/** Starts one last-operation-wins browser mutation for an authenticated owner. */
+export function beginVaultOwnerOperation(ownerId: string): VaultSessionOperation {
+  return coreBeginVaultSessionOperation(ownerId);
+}
+
+/** Returns a key-bearing capability only while this owner still owns the installed epoch. */
+export function getCurrentVaultSessionLease(ownerId: string): VaultSessionLease | null {
+  if (currentLease && currentLease.ownerId === ownerId && isVaultSessionLeaseCurrent(currentLease)) {
+    return currentLease;
+  }
+  try {
+    currentLease = captureVaultSessionLease(ownerId);
+    return currentLease;
+  } catch {
+    currentLease = null;
+    return null;
+  }
+}
+
+/** Logout/account replacement boundary. Synchronously invalidates every operation and lease. */
+export function clearVaultSessionOwnerState(): void {
+  currentLease = null;
+  unlockedAt = 0;
+  unlockMethod = undefined;
+  lockedByInactivity = false;
+  clearPreLockTimer();
+  clearVaultAutoLockTimer();
+  clearNoteBodyCache();
+  coreClearVaultSessionOwner();
+  notifyActivityChange();
+  notifyVaultSessionChange();
 }
 
 export function clearVaultCoreClientState(): void {
@@ -277,7 +341,7 @@ export function suspendVaultAutoLock(): () => void {
 
 export function touchVaultSession(): void {
   if (!hasUnlockedVaultSession() || autoLockSuspendCount > 0) return;
-  coreTouchVaultSession();
+  coreTouchVaultSession(currentLease ?? undefined);
   notifyActivityChange();
   schedulePreLockHandlers();
 }
@@ -298,10 +362,14 @@ export function lockVaultSession(reason: VaultLockReason = "manual"): void {
     clearVaultAutoLockTimer();
     notifyActivityChange();
     clearNoteBodyCache();
-    clearVaultInnerKeyMaterialCache();
     unlockedAt = 0;
     unlockMethod = undefined;
-    coreLockVaultSession();
+    currentLease = null;
+    if (reason === "logout" || reason === "account_switch") {
+      coreClearVaultSessionOwner();
+    } else {
+      coreLockVaultSession();
+    }
     notifyVaultSessionChange();
   } finally {
     lockInProgressFromApp = false;
@@ -320,16 +388,11 @@ export function resetVaultSessionLockState(): void {
   notifyVaultSessionChange();
 }
 
-/** Configure vault-core session from admin env + user localStorage preference. */
+/** Configure the server-resolved admin baseline; the React preference provider applies user state. */
 export function configureSelahkeepVaultSession(): void {
   const adminMinutes = getVaultAutoLockMinutesFromConfig();
   configureVaultSession({
     autoLockMinutes: adminMinutes,
-    resolveAutoLockMinutes: () =>
-      resolveVaultAutoLockMinutesPreference({
-        adminMinutes,
-        userMinutes: readUserVaultAutoLockMinutes(),
-      }),
   });
 }
 
@@ -338,14 +401,15 @@ export function resetVaultSessionStoreForTests(): void {
   lockedByInactivity = false;
   unlockedAt = 0;
   unlockMethod = undefined;
+  currentLease = null;
   autoLockSuspendCount = 0;
   onAutoLockCallback = null;
   beforeAutoLockHandlers.clear();
   sessionSnapshotListeners.clear();
   activityListeners.clear();
   clearPreLockTimer();
-  clearVaultInnerKeyMaterialCache();
   lockVault();
+  coreClearVaultSessionOwner();
   coreResetVaultSessionLockState();
   configureSelahkeepVaultSession();
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { noteVersionsApi, type NoteVersionResponse } from "@/lib/api-client/note-versions";
 import {
@@ -8,6 +8,9 @@ import {
   decryptNoteVersionMetadata,
   type DecryptedNoteVersion,
 } from "@/lib/crypto-client/note-versions";
+import { useApplicationState } from "@/components/application-state-provider";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 export interface NoteVersionSummary {
   id: string;
@@ -23,16 +26,23 @@ export interface NoteVersionSummary {
  * for preview / diff. All decryption is client-side via the active vault key.
  */
 export function useNoteVersions(noteId: string | null, enabled: boolean) {
+  const { ownerId } = useApplicationState();
   const [versions, setVersions] = useState<NoteVersionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   const reload = useCallback(async () => {
-    if (!noteId || !enabled) return;
+    if (!noteId || !enabled || !ownerId) return;
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: `note-versions:${noteId}`,
+    });
     setLoading(true);
     setError(null);
     try {
       const rows = await noteVersionsApi.list(noteId);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       const summaries = await Promise.all(
         rows.map(async (row) => {
           const metadata = await decryptNoteVersionMetadata(
@@ -48,16 +58,20 @@ export function useNoteVersions(noteId: string | null, enabled: boolean) {
           } satisfies NoteVersionSummary;
         })
       );
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setVersions(summaries);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load version history");
+      if (!isAsyncOwnershipCancellation(e)) {
+        setError(e instanceof Error ? e.message : "Failed to load version history");
+      }
     } finally {
-      setLoading(false);
+      if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
     }
-  }, [noteId, enabled]);
+  }, [noteId, enabled, ownerId]);
 
   useEffect(() => {
     if (!enabled) {
+      ownershipRef.current.invalidate();
       setVersions([]);
       return;
     }
@@ -65,6 +79,7 @@ export function useNoteVersions(noteId: string | null, enabled: boolean) {
   }, [enabled, reload]);
 
   useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
     setVersions([]);
     setError(null);
     setLoading(false);
@@ -72,13 +87,22 @@ export function useNoteVersions(noteId: string | null, enabled: boolean) {
 
   const loadVersionContent = useCallback(
     async (summary: NoteVersionSummary): Promise<DecryptedNoteVersion> => {
-      return decryptNoteVersion(
+      if (!ownerId || !noteId) throw new Error("Vault is locked");
+      const wrapped = summary.raw.encryptedWrappedNoteKey;
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId,
+        resourceId: `note-version:${noteId}:${summary.id}`,
+        encryptedKeyFingerprint: `${wrapped.version}:${wrapped.iv}:${wrapped.ciphertext}`,
+      });
+      const decrypted = await decryptNoteVersion(
         summary.raw.encryptedMetadata,
         summary.raw.encryptedBody,
         summary.raw.encryptedWrappedNoteKey
       );
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      return decrypted;
     },
-    []
+    [noteId, ownerId]
   );
 
   return { versions, loading, error, reload, loadVersionContent };

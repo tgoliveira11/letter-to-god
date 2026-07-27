@@ -12,8 +12,9 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { ErrorState } from "@/components/ui/error-state";
 import { useRequireVault } from "@/features/vault/use-require-vault";
 import { useVaultClientStatus } from "@/features/vault/use-vault-client-status";
-import { VaultAutoLockPreferenceField, useVaultAutoLockPreference } from "@tgoliveira/vault-core/react";
+import { VaultAutoLockPreferenceField } from "@tgoliveira/vault-core/react";
 import { getVaultAdminConfig, getVaultAutoLockMinutesFromConfig } from "@/lib/env/vault-from-env";
+import { useSelahkeepVaultAutoLockPreference } from "@/components/vault-providers";
 import { VaultStatusPrompt } from "@/features/vault/vault-status-prompt";
 import { useVaultSettings } from "@/features/notes/use-vault-settings";
 import type { VaultUnlockBehavior } from "@/lib/crypto-client/vault-settings";
@@ -44,7 +45,15 @@ const OPTIONS: Array<{
 
 function VaultAutoLockSettings() {
   const adminMinutes = getVaultAutoLockMinutesFromConfig();
-  const preference = useVaultAutoLockPreference(adminMinutes);
+  const preference = useSelahkeepVaultAutoLockPreference();
+
+  if (preference.resolutionStatus === "unavailable") {
+    return (
+      <ErrorState
+        message="Auto-lock preferences are temporarily unavailable. The vault is using the safest timeout."
+      />
+    );
+  }
 
   return (
     <VaultAutoLockPreferenceField

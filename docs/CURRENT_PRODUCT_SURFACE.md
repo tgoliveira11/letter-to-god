@@ -2,7 +2,7 @@
 
 Living inventory of what the app exposes **today**. Update this file when routes, APIs, jobs, integrations, or shipped/planned status changes.
 
-**Last reviewed:** 2026-07-25 · **Version in repo:** see `package.json`
+**Last reviewed:** 2026-07-27 · **Version in repo:** see `package.json`
 
 ---
 
@@ -79,8 +79,8 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | **Auth admin (secure-auth)** | `/api/auth/admin/*` | Users, waitlist, invites, locks, API keys, config (admin role; when `AUTH_ADMIN_ENABLED`) |
 | **Outpost admin** | `/api/outpost/admin/*` | Email queue, worker send, config, observability (platform admin; when `OUTPOST_ADMIN_ENABLED`) |
 | **Vault admin** | `/api/vault/admin/config` | Runtime vault config overrides (platform admin; requires `vault_admin_config_overrides` table) |
-| **Account** | `/api/account/*` | Profile, sessions, passkeys, 2FA, change password |
-| **Vault** | `/api/vault/*` | Setup, status, settings, index, unlock envelopes, recovery phrase, storage |
+| **Account** | `/api/account/*` | Profile, sessions, passkeys, 2FA, change password, namespaced preferences |
+| **Vault** | `/api/vault/*` | Setup, status, settings, index, unlock envelopes, recovery phrase, password-envelope KDF upgrade, storage |
 | **Passkeys (vault)** | `/api/passkeys/*` | Vault passkey register/authenticate, browser binding, and scoped bulk reset |
 | **Notes** | `/api/notes`, `/api/notes/[id]` | Encrypted CRUD only |
 | **Note versions** | `/api/notes/[id]/versions/*` | Encrypted version history |
@@ -103,6 +103,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | Audio file upload transcribe | Shipped | On-device decode ladder |
 | Encrypted local drafts | Shipped | IndexedDB; not server plaintext |
 | Vault auto-lock | Shipped | Client session timer |
+| Deterministic private state | Shipped | Server-seeded account snapshot; owner/lease/resource/generation guards discard stale async results across lock/logout/account replacement |
 | Passkey PRF vault unlock | Shipped | vault-core 1.3 candidates; synced credentials may have bounded compatibility variants and several HttpOnly-cookie browser bindings; bulk vault reset preserves account sign-in passkeys |
 | Note Kanban generation | Shipped | Deterministic on-device parsing of decrypted note markdown; no LLM/plaintext egress |
 | Note ↔ Kanban bidirectional sync | Shipped | Note-bound boards sync checklist/list structure and card state client-side (debounced); encryption unchanged |

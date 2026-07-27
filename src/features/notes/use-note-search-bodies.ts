@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { notesApi } from "@/lib/api-client/notes";
 import { decryptNote } from "@/lib/crypto-client/notes";
@@ -8,9 +8,15 @@ import {
   getCachedNoteBody,
   setCachedNoteBody,
 } from "@/features/notes/eager-decrypt-notes";
-import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import type { VaultIndexPlaintext } from "@/lib/crypto-client/vault-index-types";
 import { parseSearchTerms } from "@/lib/notes/search-normalize";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import {
+  assertVaultAsyncOwnershipCurrent,
+  captureVaultAsyncOwnership,
+  type VaultAsyncOwnership,
+} from "@/lib/application-state/vault-async-ownership";
+import { useApplicationState } from "@/components/application-state-provider";
 
 /**
  * Load decrypted note bodies in memory for full-text search after vault unlock.
@@ -23,6 +29,8 @@ export function useNoteSearchBodies(
 ): { bodies: Map<string, string> | undefined; loading: boolean } {
   const [bodies, setBodies] = useState<Map<string, string> | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const ownershipRef = useRef(new AsyncOwnershipController());
+  const { ownerId } = useApplicationState();
 
   const terms = parseSearchTerms(searchQuery);
   const needsBodies = vaultUnlocked && Boolean(index) && terms.length > 0;
@@ -30,21 +38,30 @@ export function useNoteSearchBodies(
   const entryKey = index?.entries.map((entry) => entry.id).join(",") ?? "";
 
   useEffect(() => {
+    const controller = ownershipRef.current;
     if (!needsBodies || !index) {
       setBodies(undefined);
       setLoading(false);
       return;
     }
 
-    let cancelled = false;
-    const vaultKey = getSessionVaultKey();
-    if (!vaultKey) {
+    if (!ownerId) {
+      ownershipRef.current.invalidate();
       setBodies(undefined);
       return;
     }
-    const sessionKey = vaultKey;
-
     const activeIndex = index;
+    let ownership: VaultAsyncOwnership;
+    try {
+      ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId,
+        resourceId: `note-search:${entryKey}:${searchQuery}`,
+      });
+    } catch {
+      setBodies(undefined);
+      setLoading(false);
+      return;
+    }
 
     async function load() {
       setLoading(true);
@@ -58,31 +75,35 @@ export function useNoteSearchBodies(
               return;
             }
             const note = await notesApi.get(entry.id);
+            assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
             const decrypted = await decryptNote(
               note.encryptedMetadata,
               note.encryptedBody,
               note.encryptedWrappedNoteKey,
-              sessionKey
+              ownership.lease.vaultKey
             );
-            setCachedNoteBody(entry.id, decrypted.body);
+            assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
             next.set(entry.id, decrypted.body);
           })
         );
-        if (!cancelled) setBodies(next);
-      } catch {
-        if (!cancelled) setBodies(undefined);
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+        for (const [noteId, body] of next) setCachedNoteBody(noteId, body);
+        setBodies(next);
+      } catch (cause) {
+        if (!isAsyncOwnershipCancellation(cause)) setBodies(undefined);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
       }
     }
 
     void load();
     return () => {
-      cancelled = true;
+      controller.invalidate();
     };
-  }, [needsBodies, entryKey, searchQuery, index]);
+  }, [needsBodies, entryKey, searchQuery, index, ownerId]);
 
   useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
     setBodies(undefined);
     setLoading(false);
   });

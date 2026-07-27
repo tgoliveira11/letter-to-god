@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { RecoveryPhraseReplace } from "@/features/recovery/recovery-phrase-replace";
 import { vaultApi } from "@/lib/api-client/vault";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
@@ -19,6 +20,28 @@ vi.mock("@/lib/crypto-client/vault", () => ({
 vi.mock("@/lib/crypto-client/vault-envelope", () => ({
   wrapVaultKeyForRecoveryPhrase: vi.fn(),
 }));
+
+vi.mock("@/lib/crypto-client/vault-session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/crypto-client/vault-session")>();
+  return {
+    ...actual,
+    getCurrentVaultSessionLease: vi.fn(() => ({
+      ownerId: "user-1",
+      epoch: 1,
+      role: "primary",
+      vaultKey: {} as CryptoKey,
+    })),
+  };
+});
+
+vi.mock("@tgoliveira/vault-core/browser", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tgoliveira/vault-core/browser")>();
+  return {
+    ...actual,
+    assertVaultSessionLeaseCurrent: vi.fn(),
+    isVaultSessionLeaseCurrent: vi.fn(() => true),
+  };
+});
 
 vi.mock("@/lib/crypto-client/recovery-phrase", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/crypto-client/recovery-phrase")>();

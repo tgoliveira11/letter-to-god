@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { vaultApi } from "@/lib/api-client/vault";
 import {
@@ -10,8 +10,9 @@ import {
   type VaultSettingsPlaintext,
   type VaultUnlockBehavior,
 } from "@/lib/crypto-client/vault-settings";
-import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import { subscribeVaultSession } from "@/lib/crypto-client/vault-session";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 export function useVaultSettings(userId: string | null, vaultUnlocked: boolean) {
   const canLoad = Boolean(userId && vaultUnlocked);
@@ -19,57 +20,80 @@ export function useVaultSettings(userId: string | null, vaultUnlocked: boolean) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   useEffect(() => {
     if (!canLoad) return;
 
     let cancelled = false;
+    const controller = ownershipRef.current;
 
     async function load() {
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId!,
+        resourceId: "vault-settings",
+      });
       setLoading(true);
       setError(null);
       try {
         const { encryptedVaultSettings } = await vaultApi.getSettings();
-        const vaultKey = getSessionVaultKey();
-        if (!vaultKey) {
-          if (!cancelled) setSettings(null);
-          return;
-        }
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         const decrypted = encryptedVaultSettings
-          ? await decryptVaultSettings(encryptedVaultSettings, userId!, vaultKey)
+          ? await decryptVaultSettings(encryptedVaultSettings, userId!, ownership.lease.vaultKey)
           : defaultVaultSettings();
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         if (!cancelled) setSettings(decrypted);
       } catch (e) {
-        if (!cancelled) {
+        if (!cancelled && !isAsyncOwnershipCancellation(e)) {
           setError(e instanceof Error ? e.message : "Failed to load vault settings");
           setSettings(null);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
       }
     }
 
-    void load();
+    void load().catch((error: unknown) => {
+      if (!isAsyncOwnershipCancellation(error)) {
+        setError(error instanceof Error ? error.message : "Failed to load vault settings");
+        setLoading(false);
+      }
+    });
     return () => {
       cancelled = true;
+      controller.invalidate();
     };
-  }, [canLoad, reloadToken]);
+  }, [canLoad, reloadToken, userId]);
 
-  useEffect(() => subscribeVaultSession(() => setSettings(null)), []);
+  useEffect(
+    () =>
+      subscribeVaultSession(() => {
+        ownershipRef.current.invalidate();
+        setSettings(null);
+      }),
+    []
+  );
 
-  useOnVaultLocked(() => setSettings(null));
+  useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
+    setSettings(null);
+  });
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), []);
 
   const updateUnlockBehavior = useCallback(
     async (unlockBehavior: VaultUnlockBehavior) => {
       if (!userId || !settings) throw new Error("Vault settings unavailable");
-      const vaultKey = getSessionVaultKey();
-      if (!vaultKey) throw new Error("Vault is locked");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: "vault-settings",
+      });
 
       const next = { ...settings, unlockBehavior };
-      const encrypted = await encryptVaultSettings(next, userId, vaultKey);
+      const encrypted = await encryptVaultSettings(next, userId, ownership.lease.vaultKey);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       await vaultApi.updateSettings(encrypted);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setSettings(next);
       return next;
     },

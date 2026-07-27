@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: { user: { id: "user-1" } }, status: "authenticated" })),
+}));
 import NotesPage from "@/app/(vault)/notes/page";
 import { SmartFilterChips } from "@/features/notes/smart-filter-chips";
 import { NoteCard } from "@/components/notes/note-card";

@@ -72,6 +72,12 @@ export const vaultApi = {
   }) =>
     apiClient.post<{ id: string; createdAt: string }>("/api/vault/recovery-phrase", payload),
 
+  replacePasswordEnvelope: (payload: {
+    encryptedVaultKey: EncryptedPayload;
+    kdfMetadata: KdfMetadata;
+  }) =>
+    apiClient.put<{ id: string; createdAt: string }>("/api/vault/password-envelope", payload),
+
   unlockWithRecoveryCode: () =>
     apiClient.post<{
       encryptedVaultKey: EncryptedPayload;

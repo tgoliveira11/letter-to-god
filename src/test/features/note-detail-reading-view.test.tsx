@@ -1,11 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import NoteDetailPage from "@/app/(vault)/notes/[id]/page";
 import { NoteReadingView } from "@/components/notes/note-reading-view";
 import { NoteCategoryLabel, NoteTagChip } from "@/components/notes/note-labels";
 import { USER_ID, NOTE_ID, BOARD_ID } from "@/test/helpers/fixtures";
+import { generateUserVaultKey } from "@/lib/crypto-client/vault";
+import {
+  beginVaultOwnerOperation,
+  unlockVaultSession,
+} from "@/lib/crypto-client/vault-session";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: { user: { id: USER_ID } }, status: "authenticated" })),
+}));
 
 const routerPush = vi.fn();
 
@@ -202,9 +212,14 @@ async function setupDetailMocks(metadata = baseMetadata(), body = "# Heading\n\n
 }
 
 describe("note detail reading view", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     routerPush.mockClear();
+    await unlockVaultSession(
+      await generateUserVaultKey(),
+      "password",
+      beginVaultOwnerOperation(USER_ID)
+    );
   });
 
   describe("layout and actions", () => {

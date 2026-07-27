@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { AppMark } from "@/components/ui/app-mark";
 import { signOutAccount, signOutWithRedirect } from "@/lib/auth/sign-out-client";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import { useVaultClientStatus } from "@/features/vault/use-vault-client-status";
+import { useApplicationState } from "@/components/application-state-provider";
 import { clearVaultClientState } from "@/lib/crypto-client/vault";
 import { lockVaultSession } from "@/lib/crypto-client/vault-session";
 import { PRODUCT_NAME } from "@/lib/marketing/brand";
@@ -118,7 +118,7 @@ function NavItem({
  * and hidden on small screens. See `docs/design/`.
  */
 export function AppSidebar() {
-  const { data: session } = useSession();
+  const { session } = useApplicationState();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const vaultClient = useVaultClientStatus();

@@ -22,7 +22,11 @@ import {
   useConfirmLeave,
   useUnsavedChangesWarning,
 } from "@/features/notes/use-unsaved-changes";
-import { subscribeVaultSession } from "@/lib/crypto-client/vault-session";
+import {
+  getCurrentVaultSessionLease,
+  subscribeVaultSession,
+} from "@/lib/crypto-client/vault-session";
+import { assertVaultSessionLeaseCurrent } from "@tgoliveira/vault-core/browser";
 import {
   deleteEncryptedNoteDraft,
   loadEncryptedNoteDraft,
@@ -252,16 +256,20 @@ export default function NewNotePage() {
       });
 
       if (pendingFiles.length > 0 && userId) {
-        const noteRecord = await import("@/lib/api-client/notes").then((m) => m.notesApi.get(note.id));
+        const lease = getCurrentVaultSessionLease(userId);
+        if (!lease) throw new Error("Unlock your vault before adding attachments.");
         for (const file of pendingFiles) {
+          assertVaultSessionLeaseCurrent(lease);
           const attachmentId = crypto.randomUUID();
           const encrypted = await encryptAttachment(
             userId,
             attachmentId,
             file,
-            noteRecord.encryptedWrappedNoteKey
+            note.encryptedWrappedNoteKey
           );
+          assertVaultSessionLeaseCurrent(lease);
           await noteAttachmentsApi.create({ kind: "note", id: note.id }, encrypted);
+          assertVaultSessionLeaseCurrent(lease);
         }
       }
 

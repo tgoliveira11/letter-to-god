@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import NotFound from "@/app/not-found";
@@ -11,7 +12,7 @@ import { SecureAuthUIProvider } from "@tgoliveira/secure-auth/react";
 import { testSecureAuthUiConfig } from "@/test/helpers/secure-auth-ui-config";
 import { PRODUCT_NAME } from "@/lib/marketing/brand";
 
-const useSession = vi.fn();
+const useSession = vi.fn(() => ({ data: null, status: "unauthenticated" }));
 
 vi.mock("next-auth/react", () => ({
   useSession: (...args: unknown[]) => useSession(...args),

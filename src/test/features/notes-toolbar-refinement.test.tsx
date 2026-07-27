@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: { user: { id: "user-1" } }, status: "authenticated" })),
+}));
 import NotesPage from "@/app/(vault)/notes/page";
 import { ToolbarMenu } from "@/components/ui/toolbar-menu";
 import { ViewModeToggle } from "@/features/notes/view-mode-toggle";

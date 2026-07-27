@@ -108,6 +108,7 @@ export function useVoiceTranscription(): UseVoiceTranscriptionResult {
   const segmentStartRef = useRef(0);
   const sentEndRef = useRef(0);
   const sentCommitRef = useRef(false);
+  const captureGenerationRef = useRef(0);
 
   // Subscribe to the shared (warm) worker for the lifetime of the hook.
   useEffect(() => {
@@ -117,6 +118,9 @@ export function useVoiceTranscription(): UseVoiceTranscriptionResult {
         return;
       }
       if (message.type === "ready") return; // background warm-up acknowledgement
+      // reset() (including vault lock) marks the in-flight pass inactive. A
+      // late worker result must never restore a transcript after that boundary.
+      if (!processingRef.current) return;
       processingRef.current = false;
       setTranscribing(false);
       if (message.type === "error") {
@@ -266,9 +270,14 @@ export function useVoiceTranscription(): UseVoiceTranscriptionResult {
       sentEndRef.current = 0;
       sentCommitRef.current = false;
       languageRef.current = language;
+      const generation = ++captureGenerationRef.current;
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (generation !== captureGenerationRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         streamRef.current = stream;
 
         const Ctor = getAudioContextCtor();
@@ -279,6 +288,10 @@ export function useVoiceTranscription(): UseVoiceTranscriptionResult {
 
         // Capture raw PCM off the main thread via an AudioWorklet.
         await ctx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
+        if (generation !== captureGenerationRef.current) {
+          teardownCapture();
+          return;
+        }
 
         const source = ctx.createMediaStreamSource(stream);
         sourceRef.current = source;
@@ -308,6 +321,7 @@ export function useVoiceTranscription(): UseVoiceTranscriptionResult {
         );
         setStatus("recording");
       } catch {
+        if (generation !== captureGenerationRef.current) return;
         teardownCapture();
         setError("Microphone access was denied or unavailable.");
         setStatus("error");
@@ -323,6 +337,7 @@ export function useVoiceTranscription(): UseVoiceTranscriptionResult {
   }, [teardownCapture]);
 
   const reset = useCallback(() => {
+    captureGenerationRef.current += 1;
     teardownCapture();
     pcmRef.current = [];
     processingRef.current = false;

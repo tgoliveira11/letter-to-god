@@ -19,6 +19,8 @@ This project uses a **modular monolith** under `src/modules/`. See also `docs/UT
 
 **Account authentication** (login, register, OAuth, 2FA, sessions, account passkeys, password flows) is **not** a local module — see `src/lib/secure-auth.ts` and [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./AUTH_RESET_TO_SECURE_AUTH.md).
 
+Application-state orchestration is also a boundary, not a new domain module. `src/lib/app-bootstrap.ts` may compose server-only package/services data into a non-secret snapshot. `src/lib/application-state/` may contain consumer-neutral ownership and synchronous cleanup utilities, but it must not decrypt content, access repositories, or absorb product resource state. UI consumers combine those tokens with vault-core leases as specified in [`TDR_DETERMINISTIC_APPLICATION_STATE.md`](./TDR_DETERMINISTIC_APPLICATION_STATE.md).
+
 ## Critical distinctions
 
 ```text

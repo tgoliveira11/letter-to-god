@@ -1,7 +1,13 @@
 import { runInTransaction } from "@/lib/db/transaction";
 import { vaultRepository } from "@/server/repositories/vault-repository";
 import { auditRepository } from "@/server/repositories/audit-repository";
-import type { VaultInitInput, RecoveryCodeInput, VaultSetupInput, RecoveryPhraseReplaceInput } from "@/lib/validation/vault";
+import type {
+  VaultInitInput,
+  RecoveryCodeInput,
+  VaultSetupInput,
+  RecoveryPhraseReplaceInput,
+  PasswordEnvelopeReplaceInput,
+} from "@/lib/validation/vault";
 import {
   assertVaultKeyAad,
   assertVaultSettingsAad,
@@ -238,6 +244,7 @@ export const vaultService = {
     }
 
     return runInTransaction(async (tx) => {
+      await vaultRepository.lockEnvelopeMutation(userId, "recovery_phrase", tx);
       const existing = await vaultRepository.findActiveEnvelopeByMethod(userId, "recovery_phrase", tx);
       if (!existing) {
         throw new NotFoundError("No recovery phrase configured");
@@ -261,6 +268,38 @@ export const vaultService = {
         id: envelope.id,
         createdAt: envelope.createdAt.toISOString(),
       };
+    });
+  },
+
+  async replacePasswordEnvelope(userId: string, input: PasswordEnvelopeReplaceInput) {
+    const vault = await vaultRepository.findVaultByUserId(userId);
+    if (!vault) throw new NotFoundError("Vault not initialized");
+    if (vault.vaultVersion !== "vault-v2") {
+      throw new Error("Password envelope upgrade requires vault-v2");
+    }
+
+    assertVaultKeyAad(userId, input.encryptedVaultKey, SELAHKEEP_VAULT_PROFILE.aadContextEnvelope);
+    if (input.kdfMetadata.kdf !== "argon2id") {
+      throw new Error("Password envelope requires Argon2id KDF metadata");
+    }
+
+    return runInTransaction(async (tx) => {
+      await vaultRepository.lockEnvelopeMutation(userId, "password", tx);
+      const existing = await vaultRepository.findActiveEnvelopeByMethod(userId, "password", tx);
+      if (!existing) throw new NotFoundError("No vault password configured");
+
+      await vaultRepository.revokeEnvelope(existing.id, userId, tx);
+      const envelope = await vaultRepository.createEnvelope(
+        {
+          userId,
+          method: "password",
+          encryptedVaultKey: input.encryptedVaultKey,
+          kdfMetadata: input.kdfMetadata,
+        },
+        tx
+      );
+      await auditRepository.record("vault_password_kdf_upgraded", userId, undefined, tx);
+      return { id: envelope.id, createdAt: envelope.createdAt.toISOString() };
     });
   },
 

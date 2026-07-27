@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { Schibsted_Grotesk } from "next/font/google";
 import "./globals.css";
 import { SecureAuthProviders } from "@/components/secure-auth-providers";
-import { secureAuthUiPublicConfig } from "@/lib/secure-auth-ui-public-config";
 import { SkipLink } from "@/components/layout/skip-link";
 import { ThemeInit } from "@/components/layout/theme-toggle";
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/marketing/brand";
+import { resolveAppBootstrap } from "@/lib/app-bootstrap";
 
 /**
  * "Stillness" design direction (see docs/DESIGN_SYSTEM.md). Self-hosted by
@@ -32,13 +32,15 @@ export const viewport: Viewport = {
   themeColor: "#5b3a8c",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const bootstrap = await resolveAppBootstrap();
+
   return (
     <html lang="en" className={fontSans.variable}>
       <body className="relative min-h-screen antialiased">
         <ThemeInit />
         <SkipLink />
-        <SecureAuthProviders uiConfig={secureAuthUiPublicConfig}>{children}</SecureAuthProviders>
+        <SecureAuthProviders bootstrap={bootstrap}>{children}</SecureAuthProviders>
       </body>
     </html>
   );

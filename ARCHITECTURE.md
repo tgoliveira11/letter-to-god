@@ -30,6 +30,12 @@ React UI (src/app, src/components, src/features)
   -> Database (PostgreSQL via Drizzle — src/lib/db)
 ```
 
+### Deterministic application-state boundary
+
+The root layout resolves one non-secret server snapshot (`src/lib/app-bootstrap.ts`) and seeds NextAuth, effective secure-auth UI configuration, account ownership, vault status, preferences, and admin access from that same snapshot. `AppBootstrapBoundary` hides persistent UI whenever the client session owner differs, synchronously clears private state, invalidates the vault owner, and refreshes the server tree.
+
+Private browser work uses `AsyncOwnershipController` plus a current vault-core lease. After each relevant `await`, a consumer must still own the same account, vault epoch, resource, encrypted-key identity, and request generation before it updates UI, cache, or persistence. See [`docs/TDR_DETERMINISTIC_APPLICATION_STATE.md`](./docs/TDR_DETERMINISTIC_APPLICATION_STATE.md).
+
 ## Directory Structure
 
 ```text
@@ -52,7 +58,7 @@ src/
   lib/
     crypto-client/     # Note + version encryption + legacy shims re-exporting src/modules/vault
     voice/             # Pure voice helpers: languages, audio PCM, transcript format, config
-    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.3.0)
+    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.5.1)
     api-client/        # HTTP client for API
     validation/        # Shared Zod schemas
     db/                # Drizzle client (server-only)
@@ -87,6 +93,7 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 - `POST /api/vault/unlock-envelope` — fetch encrypted envelope for password / recovery phrase unlock
 - `GET/POST /api/vault/security-events` — list and record safe vault security audit events (no secrets)
 - `POST /api/vault/recovery-phrase` — replace recovery phrase envelope (atomic revoke + create; client-side UVK wrap)
+- `PUT /api/vault/password-envelope` — persist a client-generated Argon2id KDF upgrade by atomically replacing ciphertext only; no password/UVK crosses the API
 - `POST /api/recovery-code`, `POST /api/vault/unlock-with-recovery-code` — legacy recovery code only
 - `POST /api/passkeys/register`, `POST /api/passkeys/authenticate`, `DELETE /api/passkeys` — vault recovery passkey flows (authenticated)
 - `POST /api/auth/passkey/login/options`, `POST /api/auth/passkey/login/verify` — passkey account sign-in (unauthenticated; bypasses TOTP)
@@ -99,6 +106,7 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 - `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` — password reset (generic forgot response; no vault involvement)
 - `POST /api/account/change-password`, `GET /api/account/auth-status` — signed-in password change and auth capability flags
 - `GET /api/account/sessions`, `DELETE /api/account/sessions/:id`, `POST /api/account/sessions/revoke-others`, `POST /api/account/sessions/revoke-all`, `POST /api/account/sessions/ping` — account session management (not vault unlock)
+- `GET/PATCH /api/account/preferences`, `GET/PUT/DELETE /api/account/preferences/:key`, `GET /api/account/preferences/export` — secure-auth-owned namespaced account configuration
 
 ### Account email and password flows
 

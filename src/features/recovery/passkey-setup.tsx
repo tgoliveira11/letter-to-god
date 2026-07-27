@@ -47,6 +47,15 @@ import {
   sanitizeWebAuthnResponseForServer,
 } from "@/lib/crypto-client/vault-passkey-browser";
 import type { EncryptedPayload as VaultCoreEncryptedPayload } from "@tgoliveira/vault-core";
+import {
+  assertVaultSessionLeaseCurrent,
+  assertVaultSessionOperationCurrent,
+  VaultSessionOperationCancelledError,
+} from "@tgoliveira/vault-core/browser";
+import {
+  beginVaultOwnerOperation,
+  getCurrentVaultSessionLease,
+} from "@/lib/crypto-client/vault-session";
 
 interface PasskeySetupProps {
   userId: string;
@@ -84,8 +93,10 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
       if (!vaultKey) {
         throw new Error("Unlock your vault before setting up a passkey.");
       }
+      const operation = beginVaultOwnerOperation(userId);
 
       const environment = await probePasskeyPrfEnvironmentAsync();
+      assertVaultSessionOperationCurrent(operation);
       if (shouldBlockPasskeyVaultSetupBeforeCeremony(environment)) {
         const reason = resolvePreCeremonyDiagnosticReason(environment)!;
         showDiagnosticOutcome(reason);
@@ -97,12 +108,14 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         action: "options",
         vaultOnly: true,
       })) as PublicKeyCredentialCreationOptionsJSON;
+      assertVaultSessionOperationCurrent(operation);
 
       let attestation;
       try {
         attestation = await startRegistration({
           optionsJSON: prepareRegistrationOptions(options),
         });
+        assertVaultSessionOperationCurrent(operation);
       } catch (ceremonyError) {
         if (isCeremonyCancellation(ceremonyError)) {
           setOutcome("cancelled");
@@ -189,8 +202,10 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         vaultKey,
         prfOutput,
         userId,
-        userId
+        userId,
+        operation
       );
+      assertVaultSessionOperationCurrent(operation);
 
       const result = await apiClient.post<{
         success?: boolean;
@@ -203,6 +218,7 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         encryptedVaultKey,
         prfSupported: true,
       });
+      assertVaultSessionOperationCurrent(operation);
 
       if (result.success) {
         const match = await unlockVaultFromPasskeyEnvelopeCandidates({
@@ -223,8 +239,10 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
           }],
           prfOutput,
           applySession: false,
+          operation,
           cacheInnerKey: false,
         });
+        assertVaultSessionOperationCurrent(operation);
         if (match.status !== "matched") {
           throw new Error("The new passkey envelope could not be verified locally.");
         }
@@ -243,6 +261,7 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         onStatusChange();
       }
     } catch (e) {
+      if (e instanceof VaultSessionOperationCancelledError) return;
       if (isCeremonyCancellation(e)) {
         setOutcome("cancelled");
         setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
@@ -268,7 +287,10 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
     setOutcome("idle");
 
     try {
+      const lease = getCurrentVaultSessionLease(userId);
+      if (!lease) throw new Error("Unlock your vault before removing vault passkeys.");
       await passkeysApi.removeAllVaultUnlock();
+      assertVaultSessionLeaseCurrent(lease);
       setMessage("Passkey vault unlock was removed. Account sign-in passkeys were preserved.");
       onStatusChange();
     } catch (e) {

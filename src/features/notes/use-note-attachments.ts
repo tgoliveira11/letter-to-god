@@ -15,6 +15,8 @@ import {
   getMaxAttachmentsPerNote,
 } from "@/lib/config/attachment-policy";
 import { attachmentRejectionReason } from "@/lib/notes/attachment-file-types";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 export interface AttachmentListItem {
   id: string;
@@ -75,24 +77,45 @@ export function useNoteAttachments({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pendingRef = useRef<Map<string, File>>(new Map());
-  const listInFlightRef = useRef<Promise<void> | null>(null);
+  const listInFlightRef = useRef<{ key: string; request: Promise<void> } | null>(null);
   const lastFailedLoadRef = useRef<{ key: string; at: number } | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   const reload = useCallback(async () => {
     const key = stableWrappedKey;
-    if (!stableOwner || !enabled || !key || !wrappedKeyId) {
+    if (!stableOwner || !enabled || !key || !wrappedKeyId || !userId) {
+      ownershipRef.current.invalidate();
       setAllItems([]);
       return;
     }
 
-    const loadKey = `${stableOwner.kind}:${stableOwner.id}:${wrappedKeyId}`;
+    const loadKey = `${userId}:${stableOwner.kind}:${stableOwner.id}:${wrappedKeyId}`;
     const recentFailure = lastFailedLoadRef.current;
     if (recentFailure?.key === loadKey && Date.now() - recentFailure.at < 5_000) {
       return;
     }
 
-    if (listInFlightRef.current) {
-      return listInFlightRef.current;
+    if (listInFlightRef.current?.key === loadKey) {
+      return listInFlightRef.current.request;
+    }
+
+    let ownership;
+    try {
+      ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `attachments:${stableOwner.kind}:${stableOwner.id}`,
+        encryptedKeyFingerprint: wrappedKeyId,
+      });
+    } catch (cause) {
+      // A lock/account transition can race the passive effect. It is a normal
+      // cancellation state, not a load failure and never a reason to retain UI.
+      if (isAsyncOwnershipCancellation(cause)) {
+        ownershipRef.current.invalidate();
+        setAllItems([]);
+        setLoading(false);
+        return;
+      }
+      throw cause;
     }
 
     const request = (async () => {
@@ -100,6 +123,7 @@ export function useNoteAttachments({
       setError(null);
       try {
         const { attachments } = await noteAttachmentsApi.list(stableOwner);
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         const decrypted = await Promise.all(
           attachments.map(async (record) => {
             const payload: EncryptedAttachmentPayload = {
@@ -114,32 +138,36 @@ export function useNoteAttachments({
             return { id: record.id, metadata };
           })
         );
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         lastFailedLoadRef.current = null;
         setAllItems(decrypted);
       } catch (e) {
-        lastFailedLoadRef.current = { key: loadKey, at: Date.now() };
-        setError(e instanceof Error ? e.message : "Failed to load attachments");
-        setAllItems([]);
+        if (!isAsyncOwnershipCancellation(e)) {
+          lastFailedLoadRef.current = { key: loadKey, at: Date.now() };
+          setError(e instanceof Error ? e.message : "Failed to load attachments");
+          setAllItems([]);
+        }
       } finally {
-        setLoading(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
       }
     })();
 
-    listInFlightRef.current = request;
+    listInFlightRef.current = { key: loadKey, request };
     try {
       await request;
     } finally {
-      if (listInFlightRef.current === request) {
+      if (listInFlightRef.current?.request === request) {
         listInFlightRef.current = null;
       }
     }
-  }, [stableOwner, enabled, wrappedKeyId, stableWrappedKey]);
+  }, [stableOwner, enabled, wrappedKeyId, stableWrappedKey, userId]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
     setAllItems([]);
     setError(null);
     pendingRef.current.clear();
@@ -153,6 +181,11 @@ export function useNoteAttachments({
       if (!stableOwner || !userId || !key) {
         throw new Error("Save before adding attachments");
       }
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `attachment-upload:${stableOwner.kind}:${stableOwner.id}`,
+        encryptedKeyFingerprint: wrappedKeyId,
+      });
 
       const rejection = attachmentRejectionReason(file);
       if (rejection) throw new Error(rejection);
@@ -180,45 +213,60 @@ export function useNoteAttachments({
 
       try {
         const encrypted = await encryptAttachment(userId, tempId, file, key);
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         setAllItems((current) =>
           current.map((item) =>
             item.id === tempId ? { ...item, uploadProgress: 80 } : item
           )
         );
         await noteAttachmentsApi.create(stableOwner, encrypted);
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         pendingRef.current.delete(tempId);
         onAttachmentsChange?.();
         lastFailedLoadRef.current = null;
         await reload();
         return tempId;
       } catch (e) {
+        if (isAsyncOwnershipCancellation(e)) throw e;
         pendingRef.current.delete(tempId);
         const message = e instanceof Error ? e.message : "Upload failed";
         setAllItems((current) => current.filter((item) => item.id !== tempId));
         throw new Error(message);
       }
     },
-    [allItems.length, stableOwner, onAttachmentsChange, reload, userId, stableWrappedKey]
+    [allItems.length, stableOwner, onAttachmentsChange, reload, userId, stableWrappedKey, wrappedKeyId]
   );
 
   const removeAttachment = useCallback(
     async (attachmentId: string) => {
-      if (!stableOwner) return;
+      if (!stableOwner || !userId) return;
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `attachment-delete:${stableOwner.kind}:${stableOwner.id}:${attachmentId}`,
+        encryptedKeyFingerprint: wrappedKeyId,
+      });
       await noteAttachmentsApi.delete(stableOwner, attachmentId);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       onAttachmentsChange?.();
       lastFailedLoadRef.current = null;
       await reload();
     },
-    [stableOwner, onAttachmentsChange, reload]
+    [stableOwner, onAttachmentsChange, reload, userId, wrappedKeyId]
   );
 
   const getDecryptedAttachment = useCallback(
     async (attachmentId: string) => {
       const key = stableWrappedKey;
-      if (!stableOwner || !key) {
+      if (!stableOwner || !key || !userId) {
         throw new Error("Vault must be unlocked to preview attachments");
       }
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `attachment:${stableOwner.kind}:${stableOwner.id}:${attachmentId}`,
+        encryptedKeyFingerprint: wrappedKeyId,
+      });
       const record = await noteAttachmentsApi.get(stableOwner, attachmentId);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       const payload: EncryptedAttachmentPayload = {
         id: record.id,
         encryptedMetadata: record.encryptedMetadata,
@@ -227,9 +275,11 @@ export function useNoteAttachments({
           record.blobEncryptionVersion as EncryptedAttachmentPayload["blobEncryptionVersion"],
         ciphertextBytes: record.ciphertextBytes,
       };
-      return decryptAttachment(payload, key);
+      const decrypted = await decryptAttachment(payload, key);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      return decrypted;
     },
-    [stableOwner, stableWrappedKey]
+    [stableOwner, stableWrappedKey, userId, wrappedKeyId]
   );
 
   const downloadAttachment = useCallback(

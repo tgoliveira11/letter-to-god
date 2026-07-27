@@ -1,13 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { notesApi } from "@/lib/api-client/notes";
 import { decryptNote } from "@/lib/crypto-client/notes";
 import { getCachedNoteBody, setCachedNoteBody } from "@/features/notes/eager-decrypt-notes";
-import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import { buildNotePreview, extractNoteExcerpt } from "@/lib/notes/note-excerpt";
 import type { VaultIndexPlaintext } from "@/lib/crypto-client/vault-index-types";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import {
+  assertVaultAsyncOwnershipCurrent,
+  captureVaultAsyncOwnership,
+  type VaultAsyncOwnership,
+} from "@/lib/application-state/vault-async-ownership";
+import { useApplicationState } from "@/components/application-state-provider";
 
 /**
  * Decrypt note bodies in memory for list excerpts after vault unlock.
@@ -22,10 +28,13 @@ export function useNoteListExcerpts(
   const [excerpts, setExcerpts] = useState<Map<string, string>>(new Map());
   const [previews, setPreviews] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
+  const ownershipRef = useRef(new AsyncOwnershipController());
+  const { ownerId } = useApplicationState();
 
   const entryKey = index?.entries.map((entry) => entry.id).join(",") ?? "";
 
   useEffect(() => {
+    const controller = ownershipRef.current;
     if (!enabled || !vaultUnlocked || !index) {
       setExcerpts(new Map());
       setPreviews(new Map());
@@ -33,19 +42,30 @@ export function useNoteListExcerpts(
       return;
     }
 
-    let cancelled = false;
-    const vaultKey = getSessionVaultKey();
-    if (!vaultKey) {
+    if (!ownerId) {
+      ownershipRef.current.invalidate();
       setExcerpts(new Map());
       return;
     }
-    const sessionKey = vaultKey;
     const activeIndex = index;
+    let ownership: VaultAsyncOwnership;
+    try {
+      ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId,
+        resourceId: `note-excerpts:${entryKey}`,
+      });
+    } catch {
+      setExcerpts(new Map());
+      setPreviews(new Map());
+      setLoading(false);
+      return;
+    }
 
     async function load() {
       setLoading(true);
       const next = new Map<string, string>();
       const nextPreviews = new Map<string, string>();
+      const nextBodies = new Map<string, string>();
       try {
         const activeEntries = activeIndex.entries.filter((entry) => !entry.trashed);
         await Promise.all(
@@ -53,14 +73,16 @@ export function useNoteListExcerpts(
             let body = getCachedNoteBody(entry.id);
             if (body === undefined) {
               const note = await notesApi.get(entry.id);
+              assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
               const decrypted = await decryptNote(
                 note.encryptedMetadata,
                 note.encryptedBody,
                 note.encryptedWrappedNoteKey,
-                sessionKey
+                ownership.lease.vaultKey
               );
+              assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
               body = decrypted.body;
-              setCachedNoteBody(entry.id, body);
+              nextBodies.set(entry.id, body);
             }
             const excerpt = extractNoteExcerpt(body);
             if (excerpt) next.set(entry.id, excerpt);
@@ -68,27 +90,28 @@ export function useNoteListExcerpts(
             if (preview) nextPreviews.set(entry.id, preview);
           })
         );
-        if (!cancelled) {
-          setExcerpts(next);
-          setPreviews(nextPreviews);
-        }
-      } catch {
-        if (!cancelled) {
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+        for (const [noteId, body] of nextBodies) setCachedNoteBody(noteId, body);
+        setExcerpts(next);
+        setPreviews(nextPreviews);
+      } catch (cause) {
+        if (!isAsyncOwnershipCancellation(cause)) {
           setExcerpts(new Map());
           setPreviews(new Map());
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
       }
     }
 
     void load();
     return () => {
-      cancelled = true;
+      controller.invalidate();
     };
-  }, [enabled, vaultUnlocked, entryKey, index]);
+  }, [enabled, vaultUnlocked, entryKey, index, ownerId]);
 
   useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
     setExcerpts(new Map());
     setPreviews(new Map());
     setLoading(false);

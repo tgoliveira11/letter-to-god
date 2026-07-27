@@ -27,14 +27,20 @@ import {
   verifyVaultUnlockAuthentication,
 } from "@/lib/passkey/vault-unlock-authenticate";
 import { currentDeviceLabel } from "@/lib/passkey/device-label";
+import {
+  assertVaultSessionOperationCurrent,
+  type VaultSessionOperation,
+} from "@tgoliveira/vault-core/browser";
 
 export async function unlockVaultWithPasskey(
   userId: string,
   credentialId?: string,
-  prefetchedOptions?: PublicKeyCredentialRequestOptionsJSON | null
+  prefetchedOptions?: PublicKeyCredentialRequestOptionsJSON | null,
+  operation?: VaultSessionOperation
 ): Promise<CryptoKey> {
   const effectiveCredentialId =
     credentialId ?? (await resolveActiveVaultUnlockCredentialId());
+  if (operation) assertVaultSessionOperationCurrent(operation);
 
   let assertion;
   try {
@@ -54,6 +60,7 @@ export async function unlockVaultWithPasskey(
     }
     throw error;
   }
+  if (operation) assertVaultSessionOperationCurrent(operation);
 
   const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
   let result;
@@ -72,6 +79,7 @@ export async function unlockVaultWithPasskey(
     }
     throw error;
   }
+  if (operation) assertVaultSessionOperationCurrent(operation);
 
   if (!result.verified || result.verifiedCredentialId !== assertion.id) {
     throw new Error(PASSKEY_NOT_LINKED_TO_VAULT_UNLOCK_MESSAGE);
@@ -104,6 +112,7 @@ export async function unlockVaultWithPasskey(
       verifiedCredentialId: result.verifiedCredentialId,
       candidates: result.candidates,
       prfOutput,
+      operation,
     });
     if (unlockResult.status !== "matched") {
       if (unlockResult.status === "prf_unavailable") {
@@ -120,12 +129,14 @@ export async function unlockVaultWithPasskey(
     }
 
     try {
+      if (operation) assertVaultSessionOperationCurrent(operation);
       await persistVaultPasskeyBinding({
         bindingProof: result.bindingProof,
         verifiedCredentialId: result.verifiedCredentialId,
         selectedEnvelopeVariantId: unlockResult.envelopeVariantId,
         deviceLabel: currentDeviceLabel(),
       });
+      if (operation) assertVaultSessionOperationCurrent(operation);
     } catch {
       // The verified local unlock remains valid. Binding is routing-only and can be retried.
     }

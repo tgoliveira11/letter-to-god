@@ -88,6 +88,8 @@ import {
 } from "@/lib/notes/kanban-note-resolution";
 import { recognizeKanbanActivities } from "@/lib/notes/kanban-from-note";
 import { renderSanitizedMarkdown } from "@/features/notes/sanitize-markdown";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 function editSnapshot(metadata: NoteMetadataPlaintext, body: string): string {
   return JSON.stringify({
@@ -150,6 +152,7 @@ export default function NoteDetailPage() {
   const online = useOnlineStatus();
   const checklistSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoLocked = useVaultAutoLockedCopy();
+  const loadOwnershipRef = useRef(new AsyncOwnershipController());
 
   const clientStatus =
     vaultClient.status === "ready" ? vaultClient.clientStatus : null;
@@ -230,6 +233,7 @@ export default function NoteDetailPage() {
 
   useEffect(() => {
     return subscribeVaultSession(() => {
+      loadOwnershipRef.current.invalidate();
       setMetadata(null);
       setBody("");
       setWrappedKey(null);
@@ -246,12 +250,24 @@ export default function NoteDetailPage() {
     const userId = vaultUserId;
 
     let cancelled = false;
+    const controller = loadOwnershipRef.current;
 
     async function load() {
+      let ownership = captureVaultAsyncOwnership(controller, {
+        ownerId: userId,
+        resourceId: `note:${id}`,
+      });
       setLoading(true);
       setError(null);
       try {
         const note = await notesApi.get(id);
+        assertVaultAsyncOwnershipCurrent(controller, ownership);
+        const wrapped = note.encryptedWrappedNoteKey;
+        ownership = captureVaultAsyncOwnership(controller, {
+          ownerId: userId,
+          resourceId: `note:${id}`,
+          encryptedKeyFingerprint: `${wrapped.version}:${wrapped.iv}:${wrapped.ciphertext}`,
+        });
         const cachedBody = getCachedNoteBody(id);
         let decrypted;
         if (cachedBody) {
@@ -260,6 +276,7 @@ export default function NoteDetailPage() {
             note.encryptedBody,
             note.encryptedWrappedNoteKey
           );
+          assertVaultAsyncOwnershipCurrent(controller, ownership);
           if (!cancelled) {
             setMetadata(decrypted.metadata);
             setBody(cachedBody);
@@ -271,6 +288,7 @@ export default function NoteDetailPage() {
             note.encryptedBody,
             note.encryptedWrappedNoteKey
           );
+          assertVaultAsyncOwnershipCurrent(controller, ownership);
           if (!cancelled) {
             setMetadata(decrypted.metadata);
             setBody(decrypted.body);
@@ -279,11 +297,12 @@ export default function NoteDetailPage() {
         }
 
         const draft = await loadEncryptedNoteDraft(userId, id);
+        assertVaultAsyncOwnershipCurrent(controller, ownership);
         if (!cancelled && draft) {
           setDraftPrompt(draft);
         }
       } catch (e) {
-        if (!cancelled) {
+        if (!cancelled && !isAsyncOwnershipCancellation(e)) {
           if (e instanceof ApiError && e.status === 404) {
             setNoteMissing(true);
           } else {
@@ -291,14 +310,20 @@ export default function NoteDetailPage() {
           }
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && controller.isCurrent(ownership.token)) setLoading(false);
       }
     }
 
-    load();
+    void load().catch((loadError: unknown) => {
+      if (!isAsyncOwnershipCancellation(loadError) && !cancelled) {
+        setError(loadError instanceof Error ? loadError.message : "Failed to load note");
+        setLoading(false);
+      }
+    });
 
     return () => {
       cancelled = true;
+      controller.invalidate();
     };
   }, [canRead, vaultUserId, id]);
 
