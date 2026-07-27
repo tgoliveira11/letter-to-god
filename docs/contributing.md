@@ -67,6 +67,7 @@ Also:
 - [ ] Update `CHANGELOG.md` under `## [Unreleased]` for behavior, API, schema, env vars, jobs, privacy, or visible UX changes.
 - [ ] Update `docs/CURRENT_PRODUCT_SURFACE.md` when routes, endpoints, jobs, integrations, or shipped/planned status changes.
 - [ ] Confirm no secrets (`.env`, credentials) are staged.
+- [ ] For private async changes, add ownership/conformance coverage for owner, vault epoch, resource identity, request generation, cancellation, and pending/error/empty behavior (see `TDR_DETERMINISTIC_APPLICATION_STATE.md`).
 
 Trivial docs-only changes may skip `npm run validate`.
 

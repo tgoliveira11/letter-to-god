@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { SiteShell } from "@/components/layout/site-shell";
 import HomePage from "@/app/(public)/page";
 import { VaultStatusDock } from "@/features/vault/vault-status-dock";

@@ -1,4 +1,3 @@
-import { lockVaultSession, unlockVaultSession } from "@/lib/crypto-client/vault-session";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,7 +6,10 @@ import {
   unlockWithPasswordEnvelope,
   userVaultKeysEqual,
 } from "@tgoliveira/vault-core";
-import { unlockVaultSession } from "@tgoliveira/vault-core/browser";
+import {
+  beginVaultSessionOperation,
+  unlockVaultSession,
+} from "@tgoliveira/vault-core/browser";
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -19,14 +21,14 @@ function readJson(relativePath: string): { dependencies?: Record<string, string>
 }
 
 describe("@tgoliveira/vault-core dependency", () => {
-  it("package.json pins ^1.3.0", () => {
-    expect(readJson("package.json").dependencies?.["@tgoliveira/vault-core"]).toBe("^1.3.0");
+  it("package.json pins 1.5.1", () => {
+    expect(readJson("package.json").dependencies?.["@tgoliveira/vault-core"]).toBe("1.5.1");
   });
 
-  it("lockfile resolves 1.3.0", () => {
+  it("lockfile resolves 1.5.1", () => {
     const lock = readFileSync(join(ROOT, "package-lock.json"), "utf8");
-    expect(lock).toContain('"@tgoliveira/vault-core": "^1.3.0"');
-    expect(lock).toMatch(/"node_modules\/@tgoliveira\/vault-core":\s*\{[^}]*"version":\s*"1\.3\.0"/);
+    expect(lock).toContain('"@tgoliveira/vault-core": "1.5.1"');
+    expect(lock).toMatch(/"node_modules\/@tgoliveira\/vault-core":\s*\{[^}]*"version":\s*"1\.5\.1"/);
   });
 
   it("unlockWithPasswordEnvelope accepts scope and profile", async () => {
@@ -66,6 +68,9 @@ describe("@tgoliveira/vault-core dependency", () => {
       scope,
       SELAHKEEP_VAULT_PROFILE
     );
-    await expect(unlockVaultSession(restored)).resolves.toBeUndefined();
+    const lease = await unlockVaultSession(restored, {
+      operation: beginVaultSessionOperation(userId),
+    });
+    expect(lease).toMatchObject({ ownerId: userId, vaultKey: restored });
   });
 });

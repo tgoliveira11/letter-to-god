@@ -56,6 +56,17 @@ vi.mock("@/lib/crypto-client/passkey-vault", () => ({
 vi.mock("@tgoliveira/vault-core/browser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tgoliveira/vault-core/browser")>()),
   resolvePasskeyPrfCapability: mocks.resolveCapability,
+  assertVaultSessionLeaseCurrent: vi.fn(),
+}));
+
+vi.mock("@/lib/crypto-client/vault-session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/crypto-client/vault-session")>()),
+  getCurrentVaultSessionLease: vi.fn(() => ({
+    ownerId: USER_ID,
+    epoch: 1,
+    role: "primary",
+    vaultKey: {} as CryptoKey,
+  })),
 }));
 
 vi.mock("@/lib/passkey/prepare-webauthn-options", () => ({

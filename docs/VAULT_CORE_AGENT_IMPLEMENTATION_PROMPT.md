@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Status: concluído em 2026-07-03. Não execute nem reutilize este prompt.**
 > As issues `vault-core` #8–#16 estão encerradas, o SelahKeep concluiu a adoção
-> da linha 1.1 e atualmente usa `@tgoliveira/vault-core@^1.3.0`. Para o contrato
+> da linha 1.1 e atualmente usa `@tgoliveira/vault-core@1.5.1`. Para o contrato
 > vigente de passkeys sincronizadas, variantes de envelope e bindings por browser,
 > consulte [`VAULT_CORE_1_3_ADOPTION.md`](./VAULT_CORE_1_3_ADOPTION.md).
 

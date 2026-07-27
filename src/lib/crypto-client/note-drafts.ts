@@ -3,6 +3,8 @@ import { encryptField, decryptField } from "./aes-gcm";
 import { verifyPayloadAad, ClientAadMismatchError } from "./aad-verify";
 import { getSessionVaultKey } from "./vault";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
+import { AsyncOwnershipController } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 const DB_NAME = "letters-vault";
 const DB_VERSION = 4;
@@ -27,10 +29,22 @@ interface DraftRecord {
 }
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
+const ownershipByDraft = new Map<string, AsyncOwnershipController>();
+
+function draftOwnership(userId: string, draftKey: string): AsyncOwnershipController {
+  const key = `${userId}:${draftKey}`;
+  let controller = ownershipByDraft.get(key);
+  if (!controller) {
+    controller = new AsyncOwnershipController();
+    ownershipByDraft.set(key, controller);
+  }
+  return controller;
+}
 
 /** @internal Test helper */
 export function resetNoteDraftDbForTests(): void {
   dbPromise = null;
+  ownershipByDraft.clear();
 }
 
 function openDraftDb(): Promise<IDBPDatabase> {
@@ -64,14 +78,21 @@ export async function saveEncryptedNoteDraft(
 ): Promise<void> {
   const vaultKey = getSessionVaultKey();
   if (!vaultKey) return;
+  const controller = draftOwnership(userId, draftKey);
+  const ownership = captureVaultAsyncOwnership(controller, {
+    ownerId: userId,
+    resourceId: `note-draft:${draftKey}`,
+  });
 
-  const payload = await encryptField(JSON.stringify(draft), vaultKey, {
+  const payload = await encryptField(JSON.stringify(draft), ownership.lease.vaultKey, {
     userId,
     resourceId: draftResourceId(userId, draftKey),
     field: "note_draft",
   });
+  assertVaultAsyncOwnershipCurrent(controller, ownership);
 
   const db = await openDraftDb();
+  assertVaultAsyncOwnershipCurrent(controller, ownership);
   const record: DraftRecord = {
     userId,
     draftKey,
@@ -79,6 +100,7 @@ export async function saveEncryptedNoteDraft(
     updatedAt: draft.updatedAt,
   };
   await db.put(DRAFT_STORE, record);
+  assertVaultAsyncOwnershipCurrent(controller, ownership);
 }
 
 export async function loadEncryptedNoteDraft(
@@ -87,9 +109,16 @@ export async function loadEncryptedNoteDraft(
 ): Promise<NoteDraftPlaintext | null> {
   const vaultKey = getSessionVaultKey();
   if (!vaultKey) return null;
+  const controller = draftOwnership(userId, draftKey);
+  const ownership = captureVaultAsyncOwnership(controller, {
+    ownerId: userId,
+    resourceId: `note-draft:${draftKey}`,
+  });
 
   const db = await openDraftDb();
+  assertVaultAsyncOwnershipCurrent(controller, ownership);
   const record = (await db.get(DRAFT_STORE, [userId, draftKey])) as DraftRecord | undefined;
+  assertVaultAsyncOwnershipCurrent(controller, ownership);
   if (!record?.payload) return null;
   if (record.userId !== userId) {
     throw new ClientAadMismatchError("Encrypted draft user binding mismatch");
@@ -101,7 +130,8 @@ export async function loadEncryptedNoteDraft(
     field: "note_draft",
   });
 
-  const json = await decryptField(record.payload, vaultKey);
+  const json = await decryptField(record.payload, ownership.lease.vaultKey);
+  assertVaultAsyncOwnershipCurrent(controller, ownership);
   return JSON.parse(json) as NoteDraftPlaintext;
 }
 

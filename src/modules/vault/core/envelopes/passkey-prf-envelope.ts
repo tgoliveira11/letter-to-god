@@ -13,6 +13,8 @@ import {
   cacheVaultInnerKeyMaterialFromPasskeyUnlock,
   unlockWithPasskeyPrfEnvelopeCandidates,
   type UnlockPasskeyPrfEnvelopeCandidatesResult,
+  assertVaultSessionOperationCurrent,
+  type VaultSessionOperation,
 } from "@tgoliveira/vault-core/browser";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
 import { setUnlockedVaultSession } from "@/lib/crypto-client/vault-session";
@@ -31,14 +33,17 @@ export async function wrapVaultKeyForPasskey(
   vaultKey: CryptoKey,
   prfOutput: Uint8Array,
   userId: string,
-  resourceId: string
+  resourceId: string,
+  operation?: VaultSessionOperation
 ): Promise<EncryptedPayload> {
   try {
     const envelope = await createPasskeyPrfEnvelopeWithSessionCache(
       vaultKey,
       prfOutput,
       { userId, resourceId },
-      SELAHKEEP_VAULT_PROFILE
+      SELAHKEEP_VAULT_PROFILE,
+      undefined,
+      { operation }
     );
     return envelope.encryptedVaultKey as EncryptedPayload;
   } catch (error) {
@@ -61,7 +66,12 @@ export async function wrapVaultKeyForPasskey(
 export async function unwrapVaultKeyFromPasskey(
   encryptedVaultKey: EncryptedPayload,
   prfOutput: Uint8Array,
-  options?: { applySession?: boolean; userId?: string; resourceId?: string }
+  options?: {
+    applySession?: boolean;
+    userId?: string;
+    resourceId?: string;
+    operation?: VaultSessionOperation;
+  }
 ): Promise<CryptoKey> {
   const scope = envelopeScope(options?.userId ?? encryptedVaultKey.aad.userId, options?.resourceId);
   const payload = asVaultCorePayload(encryptedVaultKey);
@@ -71,15 +81,22 @@ export async function unwrapVaultKeyFromPasskey(
     scope,
     SELAHKEEP_VAULT_PROFILE
   );
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
 
   await cacheVaultInnerKeyMaterialFromPasskeyUnlock(
     vaultKey,
     { encryptedVaultKey: payload },
-    prfOutput
+    prfOutput,
+    { operation: options?.operation }
   );
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
 
   if (options?.applySession ?? true) {
-    await setUnlockedVaultSession({ userVaultKey: vaultKey, method: "passkey_prf" });
+    await setUnlockedVaultSession({
+      userVaultKey: vaultKey,
+      method: "passkey_prf",
+      operation: options?.operation,
+    });
   }
   return vaultKey;
 }
@@ -88,7 +105,12 @@ export async function unlockVaultFromPasskeyEnvelope(
   userId: string,
   encryptedVaultKey: EncryptedPayload,
   prfOutput: Uint8Array | null,
-  options?: { prfRequired?: boolean; applySession?: boolean; resourceId?: string }
+  options?: {
+    prfRequired?: boolean;
+    applySession?: boolean;
+    resourceId?: string;
+    operation?: VaultSessionOperation;
+  }
 ): Promise<CryptoKey> {
   const scope = envelopeScope(userId, options?.resourceId);
   const payload = asVaultCorePayload(encryptedVaultKey);
@@ -99,17 +121,24 @@ export async function unlockVaultFromPasskeyEnvelope(
     SELAHKEEP_VAULT_PROFILE,
     { prfRequired: options?.prfRequired }
   );
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
 
   if (prfOutput) {
     await cacheVaultInnerKeyMaterialFromPasskeyUnlock(
       vaultKey,
       { encryptedVaultKey: payload },
-      prfOutput
+      prfOutput,
+      { operation: options?.operation }
     );
+    if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
   }
 
   if (options?.applySession ?? true) {
-    await setUnlockedVaultSession({ userVaultKey: vaultKey, method: "passkey_prf" });
+    await setUnlockedVaultSession({
+      userVaultKey: vaultKey,
+      method: "passkey_prf",
+      operation: options?.operation,
+    });
   }
   return vaultKey;
 }
@@ -121,6 +150,7 @@ export async function unlockVaultFromPasskeyEnvelopeCandidates(input: {
   prfOutput: Uint8Array | null;
   applySession?: boolean;
   cacheInnerKey?: boolean;
+  operation?: VaultSessionOperation;
 }): Promise<UnlockPasskeyPrfEnvelopeCandidatesResult> {
   const result = await unlockWithPasskeyPrfEnvelopeCandidates({
     verifiedCredentialId: input.verifiedCredentialId,
@@ -129,6 +159,7 @@ export async function unlockVaultFromPasskeyEnvelopeCandidates(input: {
     expectedScope: envelopeScope(input.userId),
     profile: SELAHKEEP_VAULT_PROFILE,
   });
+  if (input.operation) assertVaultSessionOperationCurrent(input.operation);
 
   if (result.status !== "matched") return result;
 
@@ -147,11 +178,17 @@ export async function unlockVaultFromPasskeyEnvelopeCandidates(input: {
     await cacheVaultInnerKeyMaterialFromPasskeyUnlock(
       result.vaultKey,
       matchedCandidate.envelope,
-      input.prfOutput
+      input.prfOutput,
+      { operation: input.operation }
     );
+    if (input.operation) assertVaultSessionOperationCurrent(input.operation);
   }
   if (input.applySession ?? true) {
-    await setUnlockedVaultSession({ userVaultKey: result.vaultKey, method: "passkey_prf" });
+    await setUnlockedVaultSession({
+      userVaultKey: result.vaultKey,
+      method: "passkey_prf",
+      operation: input.operation,
+    });
   }
   return result;
 }

@@ -3,12 +3,10 @@
 import Link from "next/link";
 import { useCallback, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import {
   VaultStatusDock as CoreVaultStatusDock,
   createVaultFullUnlockPageMatcher,
 } from "@tgoliveira/vault-core/react";
-import { isPrfExtensionSupported } from "@tgoliveira/vault-core/browser";
 import { useVault } from "@/features/vault/use-vault";
 import { useVaultClientStatus } from "@/features/vault/use-vault-client-status";
 import { VaultDockQuickUnlockSlot } from "@/features/vault/vault-dock-quick-unlock-slot";
@@ -21,15 +19,18 @@ import { getVaultUnlockRateLimiter } from "@/lib/vault/vault-rate-limit";
 import { toVaultServerStatusSnapshot } from "@/lib/vault/vault-server-snapshot";
 import { isVaultFullUnlockPage } from "@/features/vault/vault-status-dock-routes";
 import { lockVaultSessionManually, touchVaultSession } from "@/lib/crypto-client/vault-session";
+import { useBrowserCapabilities } from "@/components/browser-capabilities-provider";
+import { useApplicationState } from "@/components/application-state-provider";
 
 const UNLOCK_PATH = "/vault/unlock";
 const DOCK_COLLAPSED_KEY = "selahkeep:vault-status-dock:collapsed";
 
 export function VaultStatusDock() {
-  const { status: authStatus, data: session } = useSession();
+  const application = useApplicationState();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const capabilities = useBrowserCapabilities();
   const vaultClient = useVaultClientStatus();
   const {
     loading,
@@ -70,21 +71,22 @@ export function VaultStatusDock() {
     []
   );
 
-  if (authStatus !== "authenticated") return null;
+  if (!application.ownerId) return null;
   if (vaultClient.status !== "ready") return null;
+  if (capabilities.passkeyPrf.status === "checking") return null;
   if (isVaultFullUnlockPage(pathname)) return null;
 
   const { clientStatus } = vaultClient;
   const snapshot = toVaultServerStatusSnapshot(serverStatus!);
   const returnPath = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
   const rateLimiter = getVaultUnlockRateLimiter();
-  const rateLimitScopeKey = session?.user?.id ?? "vault";
+  const rateLimitScopeKey = application.ownerId;
 
   return (
     <CoreVaultStatusDock
       visible
       serverStatus={snapshot}
-      prfSupported={isPrfExtensionSupported()}
+      prfSupported={capabilities.passkeyPrf.status === "supported"}
       pathname={pathname}
       unlockPath={UNLOCK_PATH}
       buildUnlockHref={(path) => buildVaultUnlockHref(path ?? returnPath)}

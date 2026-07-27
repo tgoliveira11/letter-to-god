@@ -509,6 +509,108 @@ paths:
           description: Session revoked
         '404':
           description: Session not found
+  /api/account/preferences:
+    get:
+      tags: [Account]
+      summary: List namespaced account preferences
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Preference snapshot for the current account
+        '401':
+          description: Fully authenticated session required
+    patch:
+      tags: [Account]
+      summary: Update a set of namespaced account preferences
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Updated preference snapshot
+        '401':
+          description: Fully authenticated session required
+  /api/account/preferences/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: namespace
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Account]
+      summary: Get one namespaced account preference
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Preference value
+        '404':
+          description: Preference not found
+    put:
+      tags: [Account]
+      summary: Set one namespaced account preference
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {}
+      responses:
+        '200':
+          description: Preference stored
+    delete:
+      tags: [Account]
+      summary: Delete one namespaced account preference
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Preference deleted
+  /api/account/preferences/export:
+    get:
+      tags: [Account]
+      summary: Export current account preferences
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Account preference export
+  /api/vault/password-envelope:
+    put:
+      tags: [Vault]
+      summary: Persist a client-generated Argon2id password-envelope KDF upgrade
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [encryptedVaultKey, kdfMetadata]
+              properties:
+                encryptedVaultKey:
+                  $ref: '#/components/schemas/EncryptedPayload'
+                kdfMetadata:
+                  type: object
+      responses:
+        '200':
+          description: Ciphertext password envelope atomically replaced
+        '400':
+          description: Invalid ciphertext, AAD, KDF, or plaintext field rejected
+        '401':
+          description: Fully authenticated session required
   /api/auth/login/start:
     post:
       tags: [Auth]

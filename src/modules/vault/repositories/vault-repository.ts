@@ -1,9 +1,17 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db, type DbClient } from "@/lib/db";
 import { userVaults, vaultEnvelopes } from "@/lib/db/schema";
 import type { EncryptedPayload, KdfMetadata } from "@/lib/validation/encrypted-payload";
 
 export const vaultRepository = {
+  async lockEnvelopeMutation(userId: string, method: string, client: DbClient = db) {
+    // Serialize replace/revoke/create for one owner's envelope method. This avoids
+    // two tabs both creating an active successor from the same prior envelope.
+    await client.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${userId}:${method}`}, 0))`
+    );
+  },
+
   async findVaultByUserId(userId: string) {
     const [vault] = await db
       .select()

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import { AccountSettingsPage, SecuritySettingsPage } from "@tgoliveira/secure-auth/react";
 import { defaultSignOutAccount, signOutWithRedirect } from "@tgoliveira/secure-auth/react/client";
 import { Button } from "@/components/ui/button";
@@ -12,9 +11,10 @@ import { APP_PASSKEY_SLUG } from "@/lib/passkey/app-slug";
 import { clearVaultClientState } from "@/lib/crypto-client/vault";
 import { ACCOUNT_DELETION_VAULT_NOTE } from "@/lib/account-auth-messages";
 import { Alert } from "@/components/ui/alert";
+import { useApplicationState } from "@/components/application-state-provider";
 
 export default function AccountSettingsPageWrapper() {
-  const { data: session } = useSession();
+  const { ownerId } = useApplicationState();
 
   return (
     <AuthenticatedPage width="settings">
@@ -37,9 +37,9 @@ export default function AccountSettingsPageWrapper() {
             appSlug={APP_PASSKEY_SLUG}
             afterDeletePath="/account-deleted"
             onSignOut={async () => {
-              if (session?.user?.id) {
+              if (ownerId) {
                 try {
-                  await clearVaultClientState(session.user.id);
+                  await clearVaultClientState(ownerId);
                 } catch {
                   // Continue sign-out even if local vault cleanup fails.
                 }

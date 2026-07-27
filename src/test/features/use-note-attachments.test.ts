@@ -1,5 +1,5 @@
 /** @vitest-environment happy-dom */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import {
   assertNoVaultPlaintextInDocument,
@@ -7,6 +7,12 @@ import {
 } from "@tgoliveira/vault-core/testing";
 import { useNoteAttachments } from "@/features/notes/use-note-attachments";
 import { encryptedPayload, NOTE_ID } from "@/test/helpers/fixtures";
+import { generateUserVaultKey } from "@/lib/crypto-client/vault";
+import {
+  beginVaultOwnerOperation,
+  resetVaultSessionStoreForTests,
+  unlockVaultSession,
+} from "@/lib/crypto-client/vault-session";
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -43,6 +49,16 @@ vi.mock("@/lib/crypto-client/note-attachments", () => ({
 }));
 
 describe("useNoteAttachments", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    resetVaultSessionStoreForTests();
+    await unlockVaultSession(
+      await generateUserVaultKey(),
+      "password",
+      beginVaultOwnerOperation("user-1")
+    );
+  });
+
   it("does not re-fetch forever when the caller passes a new owner object every render", async () => {
     mocks.list.mockResolvedValue({ attachments: [] });
     const wrappedKey = encryptedPayload("note_key", NOTE_ID);

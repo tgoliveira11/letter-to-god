@@ -1,58 +1,54 @@
 "use client";
 
 import { useEffect } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import type { VaultAdminPasswordPolicy } from "@tgoliveira/vault-core";
 import { PageLayout } from "@/components/layout/page-layout";
 import { PageHeader } from "@/components/ui/page-header";
-import { LoadingState } from "@/components/ui/loading-state";
+import { ErrorState } from "@/components/ui/error-state";
 import { isVaultUnlocked } from "@/lib/crypto-client/vault";
-import { vaultApi } from "@/lib/api-client/vault";
 import { PRODUCT_NAME } from "@/lib/marketing/brand";
 import { useLtgVaultSetup } from "@/features/vault/use-ltg-vault-setup";
 import { VaultSetupWizard } from "@/features/vault/vault-setup-wizard";
+import { useApplicationState } from "@/components/application-state-provider";
 
 interface VaultSetupPageProps {
   vaultPasswordPolicy: VaultAdminPasswordPolicy;
 }
 
 export function VaultSetupPage({ vaultPasswordPolicy }: VaultSetupPageProps) {
-  const { status } = useSession();
+  const { ownerId, vaultStatus } = useApplicationState();
   const router = useRouter();
   const setup = useLtgVaultSetup(vaultPasswordPolicy);
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!ownerId) {
       router.push("/login");
       return;
     }
-    if (status !== "authenticated") return;
 
     if (isVaultUnlocked()) {
       router.push("/notes");
       return;
     }
 
-    vaultApi
-      .status()
-      .then((s) => {
-        if (s.initialized && s.setupComplete) {
-          router.push("/vault/unlock");
-        }
-      })
-      .catch(() => undefined);
-  }, [status, router]);
+    if (vaultStatus !== "unavailable" && vaultStatus?.initialized && vaultStatus.setupComplete) {
+      router.push("/vault/unlock");
+    }
+  }, [ownerId, router, vaultStatus]);
 
   async function handleComplete() {
     await setup.completeSetup();
     router.push("/notes");
   }
 
-  if (status === "loading") {
+  if (vaultStatus === "unavailable") {
     return (
       <PageLayout width="narrow">
-        <LoadingState label="Loading" />
+        <ErrorState
+          message="We could not verify your vault setup status."
+          onRetry={() => window.location.reload()}
+        />
       </PageLayout>
     );
   }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import AccountSettingsPage from "@/app/(vault)/settings/account/page";
 import { ACCOUNT_DELETION_VAULT_NOTE } from "@/lib/account-auth-messages";
 

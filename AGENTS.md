@@ -7,6 +7,7 @@
 Read and follow these documents before implementing:
 
 - `docs/TDR_LTG_Vault_MVP.md` — **SelahKeep product/architecture (primary)**
+- `docs/TDR_DETERMINISTIC_APPLICATION_STATE.md` — bootstrap, account boundary, vault lease, and async ownership contract
 - `docs/LTG_VAULT_IMPLEMENTATION_PLAN.md` — phased plan (Phases 0–5 complete)
 - `docs/ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md` — vault crypto, note keys, recovery phrase
 - `docs/archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md` — passkey PRF vault unlock
@@ -37,6 +38,15 @@ Only the **Crypto Client Layer** may handle plaintext note title/body.
 **Account authentication** is owned by `@tgoliveira/secure-auth` — do not reimplement login, OAuth, passkey account login, TOTP, sessions, or password flows locally.
 
 React components must NOT import database clients, repositories, or ORM code.
+
+## Deterministic private state
+
+Follow `docs/TDR_DETERMINISTIC_APPLICATION_STATE.md` for every private async flow:
+
+- Seed account ownership from the server bootstrap; do not reconstruct package UI/auth configuration on the client.
+- On logout or owner replacement, hide prior-owner UI, synchronously clear private state, and invalidate the vault owner before refresh.
+- Key-bearing work requires a current vault-core lease. Async results also require the same owner, lease epoch, resource, encrypted-key fingerprint (when applicable), and latest request generation before any UI/cache/persistence commit.
+- Render `pending`, `error`, and `empty` distinctly; never infer empty from unresolved or failed work.
 
 ## Forbidden
 

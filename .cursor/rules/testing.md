@@ -36,6 +36,8 @@ Use unit/service/API/feature tests for coverage. Browser E2E was removed; see `d
 12. Note persistence goes through `/api/notes` only.
 13. No active `letters` domain (`no-letters-domain.test.ts`).
 14. Active docs reflect SelahKeep (`documentation-current-state.test.ts`).
+15. Private async results are rejected after owner, vault epoch, resource, encrypted-key identity, or request-generation replacement.
+16. Account A plaintext DOM is absent before account B renders.
 
 ### IndexedDB (when touching device storage or vault unlock)
 

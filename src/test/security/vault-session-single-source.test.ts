@@ -9,6 +9,7 @@ import {
 } from "@/lib/crypto-client/vault-envelope";
 import {
   getVaultSessionSnapshot,
+  beginVaultOwnerOperation,
   hasUnlockedVaultSession,
   lockVaultSessionManually,
   resetVaultSessionStoreForTests,
@@ -21,8 +22,19 @@ const APPROVED_VAULT_CORE_BROWSER_IMPORTS = new Set([
   "src/lib/crypto-client/vault-passkey-browser.ts",
   "src/lib/vault/register-selahkeep-vault-lock-cleanup.ts",
   "src/components/vault-providers.tsx",
+  "src/components/browser-capabilities-provider.tsx",
   "src/features/vault/vault-status-dock.tsx",
+  "src/features/vault/use-ltg-vault-setup.ts",
+  "src/features/vault/use-vault.ts",
+  "src/features/passkey/unlock-with-passkey.ts",
+  "src/features/passkey/passkey-vault-unlock-setup.tsx",
+  "src/features/recovery/passkey-setup.tsx",
+  "src/features/recovery/use-replace-recovery-phrase.ts",
+  "src/features/notes/eager-decrypt-notes.ts",
   "src/app/(vault)/vault/unlock/page.tsx",
+  "src/app/(vault)/notes/new/page.tsx",
+  "src/lib/application-state/vault-async-ownership.ts",
+  "src/lib/crypto-client/vault.ts",
   "src/lib/passkey/vault-unlock-authenticate.ts",
   "src/lib/passkey/prepare-webauthn-options.ts",
   "src/lib/passkey/prf-support.ts",
@@ -75,6 +87,7 @@ describe("vault session single source of truth", () => {
     const unwrapped = await unwrapVaultKeyFromPassword(password, encryptedVaultKey, kdfMetadata, {
       applySession: true,
       unlockMethod: "password",
+      operation: beginVaultOwnerOperation(USER_ID),
     });
 
     expect(await userVaultKeysEqual(vaultKey, unwrapped)).toBe(true);
@@ -103,6 +116,7 @@ describe("vault session single source of truth", () => {
     await unwrapVaultKeyFromPassword(password, encryptedVaultKey, kdfMetadata, {
       applySession: true,
       unlockMethod: "password",
+      operation: beginVaultOwnerOperation(USER_ID),
     });
 
     unsubscribe();
@@ -124,6 +138,7 @@ describe("vault session single source of truth", () => {
 
     await unwrapVaultKeyFromPassword(password, encryptedVaultKey, kdfMetadata, {
       applySession: false,
+      operation: beginVaultOwnerOperation(USER_ID),
     });
 
     expect(hasUnlockedVaultSession()).toBe(false);

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import {
   getLoggedInNavLinks,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/navigation/logged-in-nav";
 import { cn } from "@/lib/ui/cn";
 import { VaultLockOverlayExclude } from "@/features/vault/vault-protected-shell";
+import { useApplicationState } from "@/components/application-state-provider";
 
 /** SVG glyphs for the three primary destinations, matching the design mockup. */
 const NAV_ICONS: Record<string, React.ReactNode> = {
@@ -49,7 +49,7 @@ const NAV_ICONS: Record<string, React.ReactNode> = {
  * See `docs/design/SelahKeep-hero-screens.dc.html` (bottom nav).
  */
 export function MobileBottomNav() {
-  const { data: session } = useSession();
+  const { session } = useApplicationState();
   const pathname = usePathname();
 
   if (!isFullyAuthenticatedSession(session)) return null;

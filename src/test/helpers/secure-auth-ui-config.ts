@@ -57,4 +57,6 @@ export const testSecureAuthUiConfig: SecureAuthUIPublicConfig = {
     redirectAuthenticatedFromGuestPages: true,
     authenticatedRedirectPath: "/home",
   },
+  oauthProviderIds: ["google", "apple", "azure-ad"],
+  preferences: { enabled: true },
 };

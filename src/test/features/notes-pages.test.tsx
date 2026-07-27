@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({
+    data: { user: { id: "user-1" } },
+    status: "authenticated",
+  })),
+}));
 import NotesPage from "@/app/(vault)/notes/page";
 
 vi.mock("next/navigation", () => ({

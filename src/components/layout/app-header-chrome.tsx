@@ -1,10 +1,10 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { Nav } from "@/components/layout/nav";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import { VaultLockOverlayExclude } from "@/features/vault/vault-protected-shell";
 import { cn } from "@/lib/ui/cn";
+import { useApplicationState } from "@/components/application-state-provider";
 
 /**
  * Authenticated header chrome. Vault dock handle lives inside `Nav`.
@@ -12,8 +12,8 @@ import { cn } from "@/lib/ui/cn";
  * `VaultLockOverlayExclude` wraps the header so the dock stays above the lock overlay.
  */
 export function AppHeaderChrome() {
-  const { data: session, status } = useSession();
-  const signedIn = status === "authenticated" && isFullyAuthenticatedSession(session);
+  const { session } = useApplicationState();
+  const signedIn = isFullyAuthenticatedSession(session);
 
   if (signedIn) {
     return (

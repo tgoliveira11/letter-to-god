@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import { SecureAuthUIProvider } from "@tgoliveira/secure-auth/react";
 import { LoginTwoFactorPage } from "@tgoliveira/secure-auth/react";
 import { SiteShell } from "@/components/layout/site-shell";

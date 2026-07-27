@@ -65,6 +65,7 @@ export function useAudioFileTranscription(): UseAudioFileTranscriptionResult {
   const [decodeProgress, setDecodeProgress] = useState(0);
   const [phase, setPhase] = useState<AudioFilePhase>("");
   const processingRef = useRef(false);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     if (!shouldDeferVoiceModelLoad()) {
@@ -110,9 +111,13 @@ export function useAudioFileTranscription(): UseAudioFileTranscriptionResult {
     setPhase("");
     setFileName(file.name);
     setStatus("decoding");
+    const generation = ++generationRef.current;
     try {
       ensureModelLoaded({ force: true });
-      const pcm = await decodeAudioFileToPcm(file, setDecodeProgress);
+      const pcm = await decodeAudioFileToPcm(file, (value) => {
+        if (generation === generationRef.current) setDecodeProgress(value);
+      });
+      if (generation !== generationRef.current) return;
       if (pcm.length === 0) {
         setError("That file didn't contain any audio we could read.");
         setStatus("error");
@@ -133,6 +138,7 @@ export function useAudioFileTranscription(): UseAudioFileTranscriptionResult {
       };
       postTranscription(request, [pcm.buffer]);
     } catch (err) {
+      if (generation !== generationRef.current) return;
       processingRef.current = false;
       // Surface the underlying reason — it makes "unsupported codec" vs "empty
       // file" vs "too large" failures diagnosable instead of a blanket message.
@@ -151,6 +157,7 @@ export function useAudioFileTranscription(): UseAudioFileTranscriptionResult {
   }, [supported]);
 
   const reset = useCallback(() => {
+    generationRef.current += 1;
     processingRef.current = false;
     setStatus("idle");
     setTranscript("");

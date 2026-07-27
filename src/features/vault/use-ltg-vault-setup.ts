@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useSession } from "next-auth/react";
 import {
   VAULT_VERSION_V2,
   generateUserVaultKey,
@@ -20,10 +19,19 @@ import {
   assertRecoveryPhraseChallengeAnswers,
   pickRecoveryPhraseChallengeIndices,
 } from "@/lib/crypto-client/recovery-phrase-challenge";
-import { setUnlockedVaultSession } from "@/lib/crypto-client/vault-session";
+import {
+  beginVaultOwnerOperation,
+  setUnlockedVaultSession,
+} from "@/lib/crypto-client/vault-session";
+import {
+  assertVaultSessionOperationCurrent,
+  isVaultSessionOperationCurrent,
+  VaultSessionOperationCancelledError,
+} from "@tgoliveira/vault-core/browser";
 import { vaultApi } from "@/lib/api-client/vault";
 import { validatePasswordSetup } from "@tgoliveira/secure-auth/client/password-policy";
 import type { VaultAdminPasswordPolicy } from "@tgoliveira/vault-core";
+import { useApplicationState } from "@/components/application-state-provider";
 
 export type VaultSetupStep =
   | "intro"
@@ -34,7 +42,7 @@ export type VaultSetupStep =
   | "saving";
 
 export function useLtgVaultSetup(vaultPasswordPolicy: VaultAdminPasswordPolicy) {
-  const { data: session } = useSession();
+  const { ownerId } = useApplicationState();
   const [step, setStep] = useState<VaultSetupStep>("intro");
   const [vaultPassword, setVaultPassword] = useState("");
   const [vaultPasswordConfirm, setVaultPasswordConfirm] = useState("");
@@ -72,7 +80,9 @@ export function useLtgVaultSetup(vaultPasswordPolicy: VaultAdminPasswordPolicy) 
   }, []);
 
   const completeSetup = useCallback(async () => {
-    if (!session?.user?.id) throw new Error("Not authenticated");
+    if (!ownerId) throw new Error("Not authenticated");
+    const userId = ownerId;
+    const operation = beginVaultOwnerOperation(userId);
     setLoading(true);
     setError(null);
     try {
@@ -87,8 +97,8 @@ export function useLtgVaultSetup(vaultPasswordPolicy: VaultAdminPasswordPolicy) 
         throw new Error("Vault password does not meet the required policy.");
       }
 
-      const userId = session.user.id;
       const vaultKey = await generateUserVaultKey();
+      assertVaultSessionOperationCurrent(operation);
 
       const [passwordEnvelope, recoveryEnvelope, encryptedVaultSettings, encryptedVaultIndex] =
         await Promise.all([
@@ -101,6 +111,7 @@ export function useLtgVaultSetup(vaultPasswordPolicy: VaultAdminPasswordPolicy) 
           }),
           createEmptyEncryptedVaultIndex(vaultKey, userId),
         ]);
+      assertVaultSessionOperationCurrent(operation);
 
       await vaultApi.setup({
         vaultVersion: VAULT_VERSION_V2,
@@ -120,18 +131,25 @@ export function useLtgVaultSetup(vaultPasswordPolicy: VaultAdminPasswordPolicy) 
           },
         ],
       });
+      assertVaultSessionOperationCurrent(operation);
 
-      setUnlockedVaultSession({ userVaultKey: vaultKey, method: "password" });
+      await setUnlockedVaultSession({
+        userVaultKey: vaultKey,
+        method: "password",
+        operation,
+      });
       setStep("saving");
       return vaultKey;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Vault setup failed");
+      if (!(e instanceof VaultSessionOperationCancelledError)) {
+        setError(e instanceof Error ? e.message : "Vault setup failed");
+      }
       throw e;
     } finally {
-      setLoading(false);
+      if (isVaultSessionOperationCurrent(operation)) setLoading(false);
     }
   }, [
-    session,
+    ownerId,
     vaultPassword,
     vaultPasswordConfirm,
     vaultPasswordPolicy,

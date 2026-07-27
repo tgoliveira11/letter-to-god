@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useSession } from "next-auth/react";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import { wrapVaultKeyForRecoveryPhrase } from "@/lib/crypto-client/vault-envelope";
 import {
@@ -10,6 +9,15 @@ import {
   type RecoveryPhraseLength,
 } from "@/lib/crypto-client/recovery-phrase";
 import { vaultApi } from "@/lib/api-client/vault";
+import {
+  getCurrentVaultSessionLease,
+} from "@/lib/crypto-client/vault-session";
+import {
+  assertVaultSessionLeaseCurrent,
+  isVaultSessionLeaseCurrent,
+  VaultSessionOperationCancelledError,
+} from "@tgoliveira/vault-core/browser";
+import { useApplicationState } from "@/components/application-state-provider";
 
 export type ReplaceRecoveryPhraseStep =
   | "idle"
@@ -20,7 +28,7 @@ export type ReplaceRecoveryPhraseStep =
   | "done";
 
 export function useReplaceRecoveryPhrase(onReplaced: () => void) {
-  const { data: session } = useSession();
+  const { ownerId } = useApplicationState();
   const [step, setStep] = useState<ReplaceRecoveryPhraseStep>("idle");
   const [phraseLength, setPhraseLength] = useState<RecoveryPhraseLength>(12);
   const [recoveryPhrase, setRecoveryPhrase] = useState("");
@@ -48,13 +56,19 @@ export function useReplaceRecoveryPhrase(onReplaced: () => void) {
   }, []);
 
   const replacePhrase = useCallback(async () => {
-    if (!session?.user?.id) {
+    if (!ownerId) {
       setError("Not authenticated");
       return;
     }
 
     const vaultKey = getSessionVaultKey();
     if (!vaultKey) {
+      setError("Unlock your vault before replacing your recovery phrase.");
+      return;
+    }
+    const userId = ownerId;
+    const lease = getCurrentVaultSessionLease(userId);
+    if (!lease) {
       setError("Unlock your vault before replacing your recovery phrase.");
       return;
     }
@@ -66,29 +80,32 @@ export function useReplaceRecoveryPhrase(onReplaced: () => void) {
     try {
       assertRecoveryPhraseConfirmation(recoveryPhrase, phraseConfirmation);
 
-      const userId = session.user.id;
       const recoveryEnvelope = await wrapVaultKeyForRecoveryPhrase(vaultKey, recoveryPhrase, {
         userId,
         resourceId: userId,
       });
+      assertVaultSessionLeaseCurrent(lease);
 
       await vaultApi.replaceRecoveryPhrase({
         encryptedVaultKey: recoveryEnvelope.encryptedVaultKey,
         kdfMetadata: recoveryEnvelope.kdfMetadata,
         publicMetadata: { phraseLength },
       });
+      assertVaultSessionLeaseCurrent(lease);
 
       setRecoveryPhrase("");
       setPhraseConfirmation("");
       setStep("done");
       onReplaced();
     } catch (e) {
-      setStep("phrase-confirm");
-      setError(e instanceof Error ? e.message : "Failed to replace recovery phrase");
+      if (!(e instanceof VaultSessionOperationCancelledError)) {
+        setStep("phrase-confirm");
+        setError(e instanceof Error ? e.message : "Failed to replace recovery phrase");
+      }
     } finally {
-      setLoading(false);
+      if (isVaultSessionLeaseCurrent(lease)) setLoading(false);
     }
-  }, [session, recoveryPhrase, phraseConfirmation, phraseLength, onReplaced]);
+  }, [ownerId, recoveryPhrase, phraseConfirmation, phraseLength, onReplaced]);
 
   return {
     step,

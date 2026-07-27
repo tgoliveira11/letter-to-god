@@ -1,11 +1,16 @@
 import "server-only";
+import { cache } from "react";
 import { getServerSession } from "next-auth";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import { secureAuth } from "@/lib/secure-auth";
 
-export async function getSessionUser() {
+export const getAppSession = cache(async () => {
   const services = await secureAuth.getServices();
-  const session = await getServerSession(services.getAuthOptions());
+  return getServerSession(services.getAuthOptions());
+});
+
+export async function getSessionUser() {
+  const session = await getAppSession();
   if (!session?.user?.id) return null;
   return {
     id: session.user.id,
@@ -25,8 +30,7 @@ export async function requireSessionUser() {
 }
 
 export async function requireFullyAuthenticatedUser() {
-  const services = await secureAuth.getServices();
-  const session = await getServerSession(services.getAuthOptions());
+  const session = await getAppSession();
   if (!session?.user?.id) {
     throw new UnauthorizedError("Authentication required");
   }

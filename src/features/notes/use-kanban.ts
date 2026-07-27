@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { kanbanApi, type KanbanBoardResponse, type KanbanBoardVersionResponse } from "@/lib/api-client/kanban";
 import { vaultApi } from "@/lib/api-client/vault";
 import { createCoalescedTaskQueue } from "@/lib/async/coalesced-task-queue";
@@ -20,8 +21,6 @@ import {
   updateVaultIndexEntry,
   upsertStandaloneKanbanBoardIndexEntry,
 } from "@/lib/crypto-client/vault-index";
-import { getSessionVaultKey } from "@/lib/crypto-client/vault";
-import { subscribeVaultSession } from "@/lib/crypto-client/vault-session";
 import {
   createKanbanBoardFromNote,
   createStandaloneKanbanBoard,
@@ -30,21 +29,29 @@ import { syncBoardFromNoteBody } from "@/lib/notes/kanban-sync";
 import { getKanbanProgress } from "@/lib/notes/kanban-progress";
 import type { KanbanBoardPlaintext } from "@/lib/notes/kanban-types";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
+import { useApplicationState } from "@/components/application-state-provider";
+
+type AssertCurrent = () => void;
 
 async function syncVaultIndex(
   userId: string,
-  mutate: (index: ReturnType<typeof createEmptyVaultIndex>) => ReturnType<typeof createEmptyVaultIndex>
+  vaultKey: CryptoKey,
+  mutate: (index: ReturnType<typeof createEmptyVaultIndex>) => ReturnType<typeof createEmptyVaultIndex>,
+  assertCurrent: AssertCurrent
 ) {
-  const vaultKey = getSessionVaultKey();
-  if (!vaultKey) throw new Error("Vault is locked");
-
   const { encryptedVaultIndex } = await vaultApi.getIndex();
+  assertCurrent();
   const current = encryptedVaultIndex
     ? await decryptVaultIndex(encryptedVaultIndex, userId, vaultKey)
     : createEmptyVaultIndex();
+  assertCurrent();
   const next = mutate(current);
   const encrypted = await encryptVaultIndex(next, userId, vaultKey);
+  assertCurrent();
   await vaultApi.updateIndex(encrypted);
+  assertCurrent();
 }
 
 function indexPatchForBoard(board: KanbanBoardPlaintext) {
@@ -60,7 +67,8 @@ function indexPatchForBoard(board: KanbanBoardPlaintext) {
 async function appendKanbanVersionSnapshot(
   userId: string,
   board: KanbanBoardPlaintext,
-  encryptedWrappedKey: EncryptedPayload
+  encryptedWrappedKey: EncryptedPayload,
+  assertCurrent: AssertCurrent
 ): Promise<boolean> {
   try {
     const versionId = crypto.randomUUID();
@@ -70,9 +78,12 @@ async function appendKanbanVersionSnapshot(
       board,
       encryptedWrappedKey
     );
+    assertCurrent();
     await kanbanApi.createVersion(board.boardId, payload);
+    assertCurrent();
     return true;
-  } catch {
+  } catch (cause) {
+    if (isAsyncOwnershipCancellation(cause)) throw cause;
     return false;
   }
 }
@@ -100,6 +111,7 @@ export function useKanban(userId: string | null) {
     error: null,
   });
   const encryptedWrappedKeyRef = useRef<EncryptedPayload | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
   encryptedWrappedKeyRef.current = state.encryptedWrappedKey;
 
   const persistBoardRef = useRef<
@@ -112,29 +124,45 @@ export function useKanban(userId: string | null) {
 
   persistBoardRef.current = async ({ board, encryptedWrappedKey, options }) => {
     if (!userId) throw new Error("Not authenticated");
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId: userId,
+      resourceId: `kanban:${board.boardId}`,
+      encryptedKeyFingerprint: `${encryptedWrappedKey.version}:${encryptedWrappedKey.iv}:${encryptedWrappedKey.ciphertext}`,
+    });
+    const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
     setState((current) => ({ ...current, saving: true, error: null }));
     try {
       const payload = await encryptKanbanBoard(userId, board.boardId, board, encryptedWrappedKey);
+      assertCurrent();
       const row = await kanbanApi.update(board.boardId, payload);
+      assertCurrent();
       if (options.appendVersion) {
-        await appendKanbanVersionSnapshot(userId, board, encryptedWrappedKey);
+        await appendKanbanVersionSnapshot(userId, board, encryptedWrappedKey, assertCurrent);
       }
       if (board.scope === "note" && board.noteId) {
-        await syncVaultIndex(userId, (index) =>
-          updateVaultIndexEntry(index, board.noteId!, indexPatchForBoard(board))
+        await syncVaultIndex(
+          userId,
+          ownership.lease.vaultKey,
+          (index) => updateVaultIndexEntry(index, board.noteId!, indexPatchForBoard(board)),
+          assertCurrent
         );
       } else {
         const progress = getKanbanProgress(board);
-        await syncVaultIndex(userId, (index) =>
-          upsertStandaloneKanbanBoardIndexEntry(index, {
-            id: board.boardId,
-            title: board.title,
-            total: progress.total,
-            done: progress.done,
-            updatedAt: board.updatedAt,
-          })
+        await syncVaultIndex(
+          userId,
+          ownership.lease.vaultKey,
+          (index) =>
+            upsertStandaloneKanbanBoardIndexEntry(index, {
+              id: board.boardId,
+              title: board.title,
+              total: progress.total,
+              done: progress.done,
+              updatedAt: board.updatedAt,
+            }),
+          assertCurrent
         );
       }
+      assertCurrent();
       setState((current) => ({
         ...current,
         board,
@@ -150,13 +178,17 @@ export function useKanban(userId: string | null) {
             : current.noteBoundBoards,
       }));
     } catch (error) {
-      setState((current) => ({
-        ...current,
-        error: error instanceof Error ? error.message : "Failed to save board",
-      }));
+      if (!isAsyncOwnershipCancellation(error)) {
+        setState((current) => ({
+          ...current,
+          error: error instanceof Error ? error.message : "Failed to save board",
+        }));
+      }
       throw error;
     } finally {
-      setState((current) => ({ ...current, saving: false }));
+      if (ownershipRef.current.isCurrent(ownership.token)) {
+        setState((current) => ({ ...current, saving: false }));
+      }
     }
   };
 
@@ -168,28 +200,29 @@ export function useKanban(userId: string | null) {
     }>((job) => persistBoardRef.current(job))
   );
 
-  useEffect(
-    () =>
-      subscribeVaultSession(() =>
-        setState((current) => ({
-          ...current,
-          board: null,
-          encryptedWrappedKey: null,
-          response: null,
-          standaloneBoards: [],
-          noteBoundBoards: [],
-          loading: false,
-          saving: false,
-          error: null,
-        }))
-      ),
-    []
-  );
+  useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
+    setState((current) => ({
+      ...current,
+      board: null,
+      encryptedWrappedKey: null,
+      response: null,
+      standaloneBoards: [],
+      noteBoundBoards: [],
+      loading: false,
+      saving: false,
+      error: null,
+    }));
+  });
 
-  async function decryptBoardRows(rows: KanbanBoardResponse[]): Promise<KanbanBoardPlaintext[]> {
+  async function decryptBoardRows(
+    rows: KanbanBoardResponse[],
+    assertCurrent: AssertCurrent
+  ): Promise<KanbanBoardPlaintext[]> {
     const results = await Promise.allSettled(
       rows.map((row) => decryptKanbanBoard(row.encryptedBoard, row.encryptedWrappedKey))
     );
+    assertCurrent();
     const boards: KanbanBoardPlaintext[] = [];
     for (const result of results) {
       if (result.status === "fulfilled") {
@@ -199,8 +232,9 @@ export function useKanban(userId: string | null) {
     return boards;
   }
 
-  const hydrateBoard = useCallback(async (row: KanbanBoardResponse) => {
+  const hydrateBoard = useCallback(async (row: KanbanBoardResponse, assertCurrent: AssertCurrent) => {
     const board = await decryptKanbanBoard(row.encryptedBoard, row.encryptedWrappedKey);
+    assertCurrent();
     setState((current) => ({
       ...current,
       board,
@@ -212,28 +246,46 @@ export function useKanban(userId: string | null) {
 
   const loadBoard = useCallback(
     async (boardId: string) => {
+      if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `kanban:${boardId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setState((current) => ({ ...current, loading: true, error: null }));
       try {
         const row = await kanbanApi.get(boardId);
-        return await hydrateBoard(row);
+        assertCurrent();
+        return await hydrateBoard(row, assertCurrent);
       } catch (error) {
-        setState((current) => ({
-          ...current,
-          error: error instanceof Error ? error.message : "Failed to load board",
-        }));
+        if (!isAsyncOwnershipCancellation(error)) {
+          setState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : "Failed to load board",
+          }));
+        }
         throw error;
       } finally {
-        setState((current) => ({ ...current, loading: false }));
+        if (ownershipRef.current.isCurrent(ownership.token)) {
+          setState((current) => ({ ...current, loading: false }));
+        }
       }
     },
-    [hydrateBoard]
+    [hydrateBoard, userId]
   );
 
   const loadBoardForNote = useCallback(
     async (noteId: string) => {
+      if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `kanban:note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setState((current) => ({ ...current, loading: true, error: null }));
       try {
         const rows = await kanbanApi.list({ noteId });
+        assertCurrent();
         if (rows.length === 0) {
           setState((current) => ({
             ...current,
@@ -243,39 +295,54 @@ export function useKanban(userId: string | null) {
           }));
           return null;
         }
-        return await hydrateBoard(rows[0]);
+        return await hydrateBoard(rows[0], assertCurrent);
       } catch (error) {
-        setState((current) => ({
-          ...current,
-          error: error instanceof Error ? error.message : "Failed to load board",
-        }));
+        if (!isAsyncOwnershipCancellation(error)) {
+          setState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : "Failed to load board",
+          }));
+        }
         throw error;
       } finally {
-        setState((current) => ({ ...current, loading: false }));
+        if (ownershipRef.current.isCurrent(ownership.token)) {
+          setState((current) => ({ ...current, loading: false }));
+        }
       }
     },
-    [hydrateBoard]
+    [hydrateBoard, userId]
   );
 
   const loadStandaloneBoards = useCallback(async () => {
+    if (!userId) throw new Error("Not authenticated");
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId: userId,
+      resourceId: "kanban:list",
+    });
+    const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
       const rows = await kanbanApi.list();
-      const boards = await decryptBoardRows(rows);
+      assertCurrent();
+      const boards = await decryptBoardRows(rows, assertCurrent);
       const standaloneBoards = boards.filter((board) => board.scope === "standalone");
       const noteBoundBoards = boards.filter((board) => board.scope === "note");
       setState((current) => ({ ...current, standaloneBoards, noteBoundBoards }));
       return standaloneBoards;
     } catch (error) {
-      setState((current) => ({
-        ...current,
-        error: error instanceof Error ? error.message : "Failed to load boards",
-      }));
+      if (!isAsyncOwnershipCancellation(error)) {
+        setState((current) => ({
+          ...current,
+          error: error instanceof Error ? error.message : "Failed to load boards",
+        }));
+      }
       throw error;
     } finally {
-      setState((current) => ({ ...current, loading: false }));
+      if (ownershipRef.current.isCurrent(ownership.token)) {
+        setState((current) => ({ ...current, loading: false }));
+      }
     }
-  }, []);
+  }, [userId]);
 
   const saveBoard = useCallback(
     async (
@@ -303,6 +370,11 @@ export function useKanban(userId: string | null) {
       encryptedWrappedNoteKey: EncryptedPayload
     ) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `kanban:note:${noteId}:create`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setState((current) => ({ ...current, saving: true, error: null }));
       try {
         const board = createKanbanBoardFromNote(noteId, noteTitle, body);
@@ -312,10 +384,15 @@ export function useKanban(userId: string | null) {
           board,
           encryptedWrappedNoteKey
         );
+        assertCurrent();
         const row = await kanbanApi.create({ ...payload, noteId });
-        await appendKanbanVersionSnapshot(userId, board, encryptedWrappedNoteKey);
-        await syncVaultIndex(userId, (index) =>
-          updateVaultIndexEntry(index, noteId, indexPatchForBoard(board))
+        assertCurrent();
+        await appendKanbanVersionSnapshot(userId, board, encryptedWrappedNoteKey, assertCurrent);
+        await syncVaultIndex(
+          userId,
+          ownership.lease.vaultKey,
+          (index) => updateVaultIndexEntry(index, noteId, indexPatchForBoard(board)),
+          assertCurrent
         );
         setState((current) => ({
           ...current,
@@ -326,13 +403,17 @@ export function useKanban(userId: string | null) {
         }));
         return board;
       } catch (error) {
-        setState((current) => ({
-          ...current,
-          error: error instanceof Error ? error.message : "Failed to create board",
-        }));
+        if (!isAsyncOwnershipCancellation(error)) {
+          setState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : "Failed to create board",
+          }));
+        }
         throw error;
       } finally {
-        setState((current) => ({ ...current, saving: false }));
+        if (ownershipRef.current.isCurrent(ownership.token)) {
+          setState((current) => ({ ...current, saving: false }));
+        }
       }
     },
     [userId]
@@ -341,22 +422,36 @@ export function useKanban(userId: string | null) {
   const createStandaloneBoard = useCallback(
     async (title: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const boardId = crypto.randomUUID();
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `kanban:${boardId}:create`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setState((current) => ({ ...current, saving: true, error: null }));
       try {
-        const board = createStandaloneKanbanBoard(title);
+        const board = { ...createStandaloneKanbanBoard(title), boardId };
         const boardKey = await generateBoardKey();
+        assertCurrent();
         const wrappedKey = await wrapBoardKey(userId, board.boardId, boardKey);
+        assertCurrent();
         const payload = await encryptKanbanBoard(userId, board.boardId, board, wrappedKey);
+        assertCurrent();
         const row = await kanbanApi.create({ ...payload, noteId: null });
-        await appendKanbanVersionSnapshot(userId, board, wrappedKey);
-        await syncVaultIndex(userId, (index) =>
-          upsertStandaloneKanbanBoardIndexEntry(index, {
-            id: board.boardId,
-            title: board.title,
-            total: 0,
-            done: 0,
-            updatedAt: board.updatedAt,
-          })
+        assertCurrent();
+        await appendKanbanVersionSnapshot(userId, board, wrappedKey, assertCurrent);
+        await syncVaultIndex(
+          userId,
+          ownership.lease.vaultKey,
+          (index) =>
+            upsertStandaloneKanbanBoardIndexEntry(index, {
+              id: board.boardId,
+              title: board.title,
+              total: 0,
+              done: 0,
+              updatedAt: board.updatedAt,
+            }),
+          assertCurrent
         );
         setState((current) => ({
           ...current,
@@ -368,13 +463,17 @@ export function useKanban(userId: string | null) {
         }));
         return board;
       } catch (error) {
-        setState((current) => ({
-          ...current,
-          error: error instanceof Error ? error.message : "Failed to create board",
-        }));
+        if (!isAsyncOwnershipCancellation(error)) {
+          setState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : "Failed to create board",
+          }));
+        }
         throw error;
       } finally {
-        setState((current) => ({ ...current, saving: false }));
+        if (ownershipRef.current.isCurrent(ownership.token)) {
+          setState((current) => ({ ...current, saving: false }));
+        }
       }
     },
     [userId]
@@ -399,18 +498,29 @@ export function useKanban(userId: string | null) {
       encryptedWrappedNoteKey: EncryptedPayload
     ) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `kanban:${board.boardId}:claim:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setState((current) => ({ ...current, saving: true, error: null }));
       try {
         const nextBoard: KanbanBoardPlaintext = { ...board, scope: "note", noteId };
         const payload = await encryptKanbanBoard(userId, board.boardId, nextBoard, encryptedWrappedNoteKey);
+        assertCurrent();
         const row = await kanbanApi.update(board.boardId, { ...payload, claimNoteId: noteId });
-        await appendKanbanVersionSnapshot(userId, nextBoard, encryptedWrappedNoteKey);
-        await syncVaultIndex(userId, (index) =>
-          updateVaultIndexEntry(
-            removeStandaloneKanbanBoardIndexEntry(index, board.boardId),
-            noteId,
-            indexPatchForBoard(nextBoard)
-          )
+        assertCurrent();
+        await appendKanbanVersionSnapshot(userId, nextBoard, encryptedWrappedNoteKey, assertCurrent);
+        await syncVaultIndex(
+          userId,
+          ownership.lease.vaultKey,
+          (index) =>
+            updateVaultIndexEntry(
+              removeStandaloneKanbanBoardIndexEntry(index, board.boardId),
+              noteId,
+              indexPatchForBoard(nextBoard)
+            ),
+          assertCurrent
         );
         setState((current) => ({
           ...current,
@@ -425,13 +535,17 @@ export function useKanban(userId: string | null) {
         }));
         return nextBoard;
       } catch (error) {
-        setState((current) => ({
-          ...current,
-          error: error instanceof Error ? error.message : "Failed to link board to note",
-        }));
+        if (!isAsyncOwnershipCancellation(error)) {
+          setState((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : "Failed to link board to note",
+          }));
+        }
         throw error;
       } finally {
-        setState((current) => ({ ...current, saving: false }));
+        if (ownershipRef.current.isCurrent(ownership.token)) {
+          setState((current) => ({ ...current, saving: false }));
+        }
       }
     },
     [userId]
@@ -440,12 +554,22 @@ export function useKanban(userId: string | null) {
   const deleteBoard = useCallback(
     async (board: KanbanBoardPlaintext) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `kanban:${board.boardId}:delete`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       await kanbanApi.delete(board.boardId);
+      assertCurrent();
       if (board.scope === "standalone") {
-        await syncVaultIndex(userId, (index) =>
-          removeStandaloneKanbanBoardIndexEntry(index, board.boardId)
+        await syncVaultIndex(
+          userId,
+          ownership.lease.vaultKey,
+          (index) => removeStandaloneKanbanBoardIndexEntry(index, board.boardId),
+          assertCurrent
         );
       }
+      assertCurrent();
       setState((current) => ({
         ...current,
         board: current.board?.boardId === board.boardId ? null : current.board,
@@ -471,25 +595,36 @@ export function useKanban(userId: string | null) {
 }
 
 export function useKanbanVersions(boardId: string | null, enabled: boolean) {
+  const { ownerId } = useApplicationState();
   const [versions, setVersions] = useState<KanbanBoardVersionResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   const reload = useCallback(async () => {
-    if (!boardId || !enabled) return;
+    if (!boardId || !enabled || !ownerId) return;
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: `kanban:${boardId}:versions`,
+    });
     setLoading(true);
     setError(null);
     try {
-      setVersions(await kanbanApi.listVersions(boardId));
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to load board history");
+      const rows = await kanbanApi.listVersions(boardId);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      setVersions(rows);
+    } catch (cause) {
+      if (!isAsyncOwnershipCancellation(cause)) {
+        setError(cause instanceof Error ? cause.message : "Failed to load board history");
+      }
     } finally {
-      setLoading(false);
+      if (ownershipRef.current.isCurrent(ownership.token)) setLoading(false);
     }
-  }, [boardId, enabled]);
+  }, [boardId, enabled, ownerId]);
 
   useEffect(() => {
     if (!enabled) {
+      ownershipRef.current.invalidate();
       setVersions([]);
       return;
     }
@@ -497,10 +632,29 @@ export function useKanbanVersions(boardId: string | null, enabled: boolean) {
   }, [enabled, reload]);
 
   const loadVersionContent = useCallback(
-    async (version: KanbanBoardVersionResponse): Promise<KanbanBoardPlaintext> =>
-      decryptKanbanVersion(version.encryptedBoard, version.encryptedWrappedKey),
-    []
+    async (version: KanbanBoardVersionResponse): Promise<KanbanBoardPlaintext> => {
+      if (!ownerId || !boardId) throw new Error("Board ownership is unavailable");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId,
+        resourceId: `kanban:${boardId}:version:${version.id}`,
+        encryptedKeyFingerprint: `${version.encryptedWrappedKey.version}:${version.encryptedWrappedKey.iv}:${version.encryptedWrappedKey.ciphertext}`,
+      });
+      const board = await decryptKanbanVersion(
+        version.encryptedBoard,
+        version.encryptedWrappedKey
+      );
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+      return board;
+    },
+    [boardId, ownerId]
   );
+
+  useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
+    setVersions([]);
+    setLoading(false);
+    setError(null);
+  });
 
   return { versions, loading, error, reload, loadVersionContent };
 }

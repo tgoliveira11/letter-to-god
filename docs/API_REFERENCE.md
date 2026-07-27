@@ -100,6 +100,10 @@ vault setup (`POST /api/vault/setup`) always creates a `recovery_phrase` envelop
 
 `POST /api/vault/recovery-phrase` atomically revokes the previous active `recovery_phrase` envelope and creates a new one. Legacy `POST /api/recovery-code` remains for older `recovery_code` envelopes only; SelahKeep `/vault/recovery` does not generate new recovery codes.
 
+### Vault password envelope upgrades
+
+`PUT /api/vault/password-envelope` persists a stronger Argon2id ciphertext envelope after a successful client-side password unlock recommends a KDF upgrade. The route accepts only `encryptedVaultKey` and `kdfMetadata`, validates vault AAD, and atomically revokes/replaces the prior password envelope. The vault password and UVK never leave the browser.
+
 See `docs/ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md` and `SECURITY.md`.
 
 ### Email verification and account passwords
@@ -131,6 +135,16 @@ Account sessions (sign-in state) are separate from vault unlock.
 | `POST` | `/api/account/sessions/ping` | Session |
 
 Responses include masked IP and coarse browser/platform metadata only — never raw session tokens or private letter content.
+
+### Account preferences
+
+Preferences are package-owned account configuration and require a fully authenticated session. SelahKeep uses the namespaced vault auto-lock preference only; these routes never receive vault keys or private note content.
+
+| Method | Path | Auth |
+|--------|------|------|
+| `GET`, `PATCH` | `/api/account/preferences` | Fully authenticated session |
+| `GET`, `PUT`, `DELETE` | `/api/account/preferences/:key?namespace=...` | Fully authenticated session |
+| `GET` | `/api/account/preferences/export` | Fully authenticated session |
 
 **Email delivery:** transactional messages use `sendEmail()` with `EMAIL_PROVIDER=console` (dev debug), `smtp` (Mailpit locally or Brevo/staging), or future providers. Emails contain account-auth links only — never private letter content. See `README.md` for Mailpit and Brevo SMTP configuration.
 

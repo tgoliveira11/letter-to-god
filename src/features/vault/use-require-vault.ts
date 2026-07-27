@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { hasUnlockedVaultSession } from "@/lib/crypto-client/vault";
 import { purgeTrustedDeviceIdb } from "@/lib/crypto-client/vault-idb-cleanup";
@@ -11,6 +10,7 @@ import {
   subscribeVaultSession,
 } from "@/lib/crypto-client/vault-session";
 import { applyUnlockBehavior } from "@/features/notes/eager-decrypt-notes";
+import { useApplicationState } from "@/components/application-state-provider";
 
 type VaultGateState =
   | { status: "loading" }
@@ -27,7 +27,8 @@ type VaultReadyState =
  * Ensures the user is authenticated. Account session alone never unlocks the vault.
  */
 export function useRequireVault(): VaultGateState & { recheckVault: () => void } {
-  const { data: session, status: authStatus } = useSession();
+  const application = useApplicationState();
+  const userId = application.ownerId;
   const router = useRouter();
   const [readyState, setReadyState] = useState<VaultReadyState>({ status: "pending" });
   const [recheckToken, setRecheckToken] = useState(0);
@@ -47,28 +48,20 @@ export function useRequireVault(): VaultGateState & { recheckVault: () => void }
   }, []);
 
   useEffect(() => {
-    if (authStatus === "unauthenticated") {
+    if (!userId) {
       router.push("/login");
     }
-  }, [authStatus, router]);
+  }, [router, userId]);
 
   useEffect(() => {
-    if (authStatus === "loading" || authStatus === "unauthenticated") {
-      return;
-    }
-
-    const sessionUserId = session?.user?.id;
-    if (!sessionUserId) {
-      return;
-    }
-
-    const userId: string = sessionUserId;
+    if (!userId) return;
+    const activeUserId = userId;
     let cancelled = false;
 
     async function ensureAuth() {
       if (isVaultManuallyLocked()) {
         if (!cancelled) {
-          setReadyState({ status: "ready", userId, vaultUnlocked: false });
+          setReadyState({ status: "ready", userId: activeUserId, vaultUnlocked: false });
         }
         return;
       }
@@ -76,11 +69,11 @@ export function useRequireVault(): VaultGateState & { recheckVault: () => void }
       const vaultUnlocked = hasUnlockedVaultSession();
 
       if (!cancelled) {
-        setReadyState({ status: "ready", userId, vaultUnlocked });
+        setReadyState({ status: "ready", userId: activeUserId, vaultUnlocked });
       }
 
       if (vaultUnlocked && !cancelled) {
-        void applyUnlockBehavior(userId).catch(() => undefined);
+        void applyUnlockBehavior(activeUserId).catch(() => undefined);
       }
     }
 
@@ -89,18 +82,10 @@ export function useRequireVault(): VaultGateState & { recheckVault: () => void }
     return () => {
       cancelled = true;
     };
-  }, [authStatus, session?.user?.id, recheckToken]);
+  }, [recheckToken, userId]);
 
-  if (authStatus === "loading") {
-    return { status: "loading", recheckVault };
-  }
-
-  if (authStatus === "unauthenticated") {
+  if (!userId) {
     return { status: "redirecting", recheckVault };
-  }
-
-  if (authStatus === "authenticated" && !session?.user?.id) {
-    return { status: "error", message: "Session is missing user id.", recheckVault };
   }
 
   if (readyState.status === "pending") {
@@ -111,6 +96,8 @@ export function useRequireVault(): VaultGateState & { recheckVault: () => void }
 }
 
 /** Call after generating a new vault key during first-time setup. */
-export function rememberVaultKey(vaultKey: CryptoKey): void {
-  setUnlockedVaultSession({ userVaultKey: vaultKey, method: "password" });
+export async function rememberVaultKey(userId: string, vaultKey: CryptoKey): Promise<void> {
+  const { beginVaultOwnerOperation } = await import("@/lib/crypto-client/vault-session");
+  const operation = beginVaultOwnerOperation(userId);
+  await setUnlockedVaultSession({ userVaultKey: vaultKey, method: "password", operation });
 }

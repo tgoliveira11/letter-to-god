@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import NoteDetailPage from "@/app/(vault)/notes/[id]/page";
 import RemembrancePage from "@/app/(vault)/notes/remembrance/page";
 import WeeklyReflectionPage from "@/app/(vault)/notes/weekly-reflection/page";
@@ -9,6 +10,15 @@ import { PromptCards } from "@/components/notes/prompt-cards";
 import { SavedViewsMenu } from "@/features/notes/saved-views-menu";
 import { normalizeNoteMetadata } from "@/lib/notes/note-metadata";
 import { USER_ID, NOTE_ID } from "@/test/helpers/fixtures";
+import { generateUserVaultKey } from "@/lib/crypto-client/vault";
+import {
+  beginVaultOwnerOperation,
+  unlockVaultSession,
+} from "@/lib/crypto-client/vault-session";
+
+vi.mock("next-auth/react", () => ({
+  useSession: vi.fn(() => ({ data: { user: { id: USER_ID } }, status: "authenticated" })),
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: vi.fn(() => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() })),
@@ -117,8 +127,13 @@ const metadata = normalizeNoteMetadata({
 });
 
 describe("reflective workflows track 5", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    await unlockVaultSession(
+      await generateUserVaultKey(),
+      "password",
+      beginVaultOwnerOperation(USER_ID)
+    );
     vi.mocked(useRequireVault).mockReturnValue(readyVault);
     vi.mocked(useVaultClientStatus).mockReturnValue(unlockedClient);
     vi.mocked(useVaultIndex).mockReturnValue({

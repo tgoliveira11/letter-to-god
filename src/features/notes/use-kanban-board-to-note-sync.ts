@@ -1,11 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useOnVaultLocked } from "@tgoliveira/vault-core/react";
 import { notesApi } from "@/lib/api-client/notes";
 import { decryptNote, type NoteMetadataPlaintext } from "@/lib/crypto-client/notes";
 import { syncNoteAndBoardFromBoardChange } from "@/lib/notes/kanban-sync";
 import type { KanbanBoardPlaintext } from "@/lib/notes/kanban-types";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
+import { useApplicationState } from "@/components/application-state-provider";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
 
 const BOARD_TO_NOTE_DEBOUNCE_MS = 800;
 
@@ -52,6 +56,7 @@ export function useKanbanBoardToNoteSync({
   updateNote,
   encryptedWrappedKey,
 }: UseKanbanBoardToNoteSyncOptions) {
+  const { ownerId } = useApplicationState();
   const [noteBody, setNoteBody] = useState("");
   const [noteMetadata, setNoteMetadata] = useState<NoteMetadataPlaintext | null>(null);
   const [wrappedKey, setWrappedKey] = useState<EncryptedPayload | null>(null);
@@ -59,47 +64,59 @@ export function useKanbanBoardToNoteSync({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSyncedBoardRef = useRef<string | null>(null);
   const syncingRef = useRef(false);
+  const ownershipRef = useRef(new AsyncOwnershipController());
+  const boardId = board?.boardId;
+  const boardNoteId = board?.noteId;
+  const boardScope = board?.scope;
 
   useEffect(() => {
-    if (!enabled || !board || board.scope !== "note" || !board.noteId) {
+    const controller = ownershipRef.current;
+    if (!enabled || !ownerId || !boardId || boardScope !== "note" || !boardNoteId) {
+      ownershipRef.current.invalidate();
       setNoteBody("");
       setNoteMetadata(null);
       setWrappedKey(null);
       return;
     }
 
-    let cancelled = false;
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: `kanban-note-sync:${boardId}:${boardNoteId}`,
+      encryptedKeyFingerprint: encryptedWrappedKey
+        ? `${encryptedWrappedKey.version}:${encryptedWrappedKey.iv}:${encryptedWrappedKey.ciphertext}`
+        : null,
+    });
     setNoteLoading(true);
 
     void (async () => {
       try {
-        const row = await notesApi.get(board.noteId!);
+        const row = await notesApi.get(boardNoteId);
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
         const decrypted = await decryptNote(
           row.encryptedMetadata,
           row.encryptedBody,
           row.encryptedWrappedNoteKey
         );
-        if (!cancelled) {
-          setNoteBody(decrypted.body);
-          setNoteMetadata(decrypted.metadata);
-          setWrappedKey(row.encryptedWrappedNoteKey);
-          lastSyncedBoardRef.current = null;
-        }
-      } catch {
-        if (!cancelled) {
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
+        setNoteBody(decrypted.body);
+        setNoteMetadata(decrypted.metadata);
+        setWrappedKey(row.encryptedWrappedNoteKey);
+        lastSyncedBoardRef.current = null;
+      } catch (cause) {
+        if (!isAsyncOwnershipCancellation(cause)) {
           setNoteBody("");
           setNoteMetadata(null);
           setWrappedKey(null);
         }
       } finally {
-        if (!cancelled) setNoteLoading(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setNoteLoading(false);
       }
     })();
 
     return () => {
-      cancelled = true;
+      controller.invalidate();
     };
-  }, [board?.boardId, board?.noteId, board?.scope, enabled]);
+  }, [boardId, boardNoteId, boardScope, enabled, encryptedWrappedKey, ownerId]);
 
   const fingerprint = board ? boardFingerprint(board) : null;
 
@@ -117,6 +134,15 @@ export function useKanbanBoardToNoteSync({
       return;
     }
     if (lastSyncedBoardRef.current === fingerprint) return;
+    if (!ownerId) return;
+
+    const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+      ownerId,
+      resourceId: `kanban-note-sync:${board.boardId}:${board.noteId}:save`,
+      encryptedKeyFingerprint: wrappedKey
+        ? `${wrappedKey.version}:${wrappedKey.iv}:${wrappedKey.ciphertext}`
+        : null,
+    });
 
     const result = syncNoteAndBoardFromBoardChange(board, noteBody);
     if (!result.changed) {
@@ -129,9 +155,11 @@ export function useKanbanBoardToNoteSync({
       lastSyncedBoardRef.current = fingerprint;
       setNoteBody(result.body);
       await updateNote(board.noteId, noteMetadata, result.body, wrappedKey);
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       await saveBoard(result.board, encryptedWrappedKey, { appendVersion: true });
+      assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
     } finally {
-      syncingRef.current = false;
+      if (ownershipRef.current.isCurrent(ownership.token)) syncingRef.current = false;
     }
   }, [
     board,
@@ -144,18 +172,31 @@ export function useKanbanBoardToNoteSync({
     saveBoard,
     updateNote,
     wrappedKey,
+    ownerId,
   ]);
 
   useEffect(() => {
     if (!enabled || !board || board.scope !== "note" || noteLoading || !noteMetadata) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      void runSync();
+      // Mutation hooks already expose non-cancellation failures in their own UI state.
+      void runSync().catch(() => undefined);
     }, BOARD_TO_NOTE_DEBOUNCE_MS);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      syncingRef.current = false;
     };
   }, [fingerprint, enabled, board, noteLoading, noteMetadata, runSync]);
+
+  useOnVaultLocked(() => {
+    ownershipRef.current.invalidate();
+    if (timerRef.current) clearTimeout(timerRef.current);
+    syncingRef.current = false;
+    setNoteBody("");
+    setNoteMetadata(null);
+    setWrappedKey(null);
+    setNoteLoading(false);
+  });
 
   return { noteBody, noteLoading, runSync };
 }

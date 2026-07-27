@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import VaultSecurityPage from "@/app/(vault)/vault/security/page";
 import VaultSettingsPage from "@/app/(vault)/vault/settings/page";
 import { useRequireVault } from "@/features/vault/use-require-vault";
@@ -23,6 +24,19 @@ vi.mock("@/features/vault/use-require-vault", () => ({
 
 vi.mock("@/features/vault/use-vault-client-status", () => ({
   useVaultClientStatus: vi.fn(),
+}));
+
+vi.mock("@/components/vault-providers", () => ({
+  useSelahkeepVaultAutoLockPreference: vi.fn(() => ({
+    minutes: 15,
+    setMinutes: vi.fn(),
+    resetToAdminDefault: vi.fn(),
+    adminMaxMinutes: 15,
+    minMinutes: 1,
+    usingUserPreference: false,
+    resolutionStatus: "ready",
+    retryResolution: vi.fn(),
+  })),
 }));
 
 vi.mock("@/features/vault/vault-security-review", () => ({

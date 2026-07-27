@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   findActiveEnvelopesByUserId: vi.fn(),
   findActiveEnvelopeByMethod: vi.fn(),
   findEnvelopesByMethod: vi.fn(),
+  lockEnvelopeMutation: vi.fn(),
   revokeEnvelope: vi.fn(),
   updateVaultIndex: vi.fn(),
   updateVaultSettings: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock("@/server/repositories/vault-repository", () => ({
     findActiveEnvelopesByUserId: mocks.findActiveEnvelopesByUserId,
     findActiveEnvelopeByMethod: mocks.findActiveEnvelopeByMethod,
     findEnvelopesByMethod: mocks.findEnvelopesByMethod,
+    lockEnvelopeMutation: mocks.lockEnvelopeMutation,
     revokeEnvelope: mocks.revokeEnvelope,
     updateVaultIndex: mocks.updateVaultIndex,
     updateVaultSettings: mocks.updateVaultSettings,
@@ -330,6 +332,52 @@ describe("vault service", () => {
         },
       })
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("atomically replaces a password envelope after a KDF upgrade", async () => {
+    mocks.findVaultByUserId.mockResolvedValue({ id: "vault-1", vaultVersion: "vault-v2" });
+    mocks.findActiveEnvelopeByMethod.mockResolvedValue({ id: "env-password-old" });
+    mocks.createEnvelope.mockResolvedValue({
+      id: "env-password-new",
+      createdAt: new Date("2026-07-27T12:00:00.000Z"),
+    });
+
+    const result = await vaultService.replacePasswordEnvelope(USER_ID, {
+      encryptedVaultKey: encryptedPayload("vault_key", USER_ID),
+      kdfMetadata: {
+        kdf: "argon2id",
+        version: "kdf-v2",
+        salt: "c2FsdA",
+        memory: 65536,
+        iterations: 3,
+        parallelism: 1,
+      },
+    });
+
+    expect(mocks.lockEnvelopeMutation).toHaveBeenCalledWith(
+      USER_ID,
+      "password",
+      expect.anything()
+    );
+    expect(mocks.revokeEnvelope).toHaveBeenCalledWith(
+      "env-password-old",
+      USER_ID,
+      expect.anything()
+    );
+    expect(mocks.createEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "password" }),
+      expect.anything()
+    );
+    expect(mocks.record).toHaveBeenCalledWith(
+      "vault_password_kdf_upgraded",
+      USER_ID,
+      undefined,
+      expect.anything()
+    );
+    expect(result).toEqual({
+      id: "env-password-new",
+      createdAt: "2026-07-27T12:00:00.000Z",
+    });
   });
 
   it("includes recovery phrase metadata in status", async () => {

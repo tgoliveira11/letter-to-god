@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { renderWithTestApplicationState as render } from "@/test/helpers/application-state";
 import NotesPage from "@/app/(vault)/notes/page";
 import NewNotePage from "@/app/(vault)/notes/new/page";
 import AccountSettingsPage from "@/app/(vault)/settings/account/page";

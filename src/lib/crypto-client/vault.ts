@@ -1,5 +1,9 @@
 import type { EncryptedPayload, KdfMetadata } from "@/lib/validation/encrypted-payload";
 import {
+  assertVaultSessionOperationCurrent,
+  type VaultSessionOperation,
+} from "@tgoliveira/vault-core/browser";
+import {
   generateUserVaultKey,
   getSessionVaultKey,
   setSessionVaultKey,
@@ -82,17 +86,27 @@ export async function unwrapVaultKeyFromRecovery(
   recoveryCode: string,
   encryptedVaultKey: EncryptedPayload,
   kdfMetadata: KdfMetadata,
-  options?: { applySession?: boolean }
+  options?: {
+    applySession?: boolean;
+    operation?: VaultSessionOperation;
+  }
 ): Promise<CryptoKey> {
   const { deriveRecoveryKeyFromMetadata } = await import("./recovery-code");
   const { decryptField, importAesKey } = await import("./aes-gcm");
   const { base64UrlToBytes } = await import("./encoding");
   const { setUnlockedVaultSession } = await import("@/lib/crypto-client/vault-session");
   const derivedKey = await deriveRecoveryKeyFromMetadata(recoveryCode, kdfMetadata);
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
   const keyBytes = base64UrlToBytes(await decryptField(encryptedVaultKey, derivedKey));
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
   const vaultKey = await importAesKey(keyBytes);
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
   if (options?.applySession ?? true) {
-    await setUnlockedVaultSession({ userVaultKey: vaultKey, method: "recovery_phrase" });
+    await setUnlockedVaultSession({
+      userVaultKey: vaultKey,
+      method: "recovery_phrase",
+      operation: options?.operation,
+    });
   }
   return vaultKey;
 }

@@ -43,7 +43,7 @@ export default function KanbanBoardPage() {
   const [creatingNote, setCreatingNote] = useState(false);
 
   useEffect(() => {
-    if (canRead) void loadBoard(boardId);
+    if (canRead) void loadBoard(boardId).catch(() => undefined);
   }, [boardId, canRead, loadBoard]);
 
   if (vault.status === "loading" || vault.status === "redirecting" || vaultClient.status === "loading") {

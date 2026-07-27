@@ -1,0 +1,16 @@
+---
+description: Deterministic owner, vault lease, and private asynchronous state rules
+alwaysApply: true
+---
+
+# Deterministic private application state
+
+Read `docs/TDR_DETERMINISTIC_APPLICATION_STATE.md` before changing authenticated or private async flows.
+
+- Use the server bootstrap as the first-frame source of account ownership and effective secure-auth UI configuration.
+- Never render prior-owner private state across account replacement, logout, or a partial/unresolved session.
+- Start vault mutations with a vault-core owner operation and use the installed vault lease for key-bearing work.
+- Before committing an async result, assert the same owner, lease epoch, resource, encrypted-key fingerprint when applicable, and latest request generation.
+- Lock, logout, or account replacement cancels outstanding work; cancellation is not an empty or error resource result.
+- Keep pending, ready, empty, and error distinct. Do not add a root loading boundary that masks not-found behavior.
+- Never put raw keys, bearer tokens, plaintext, or exportable key material into ownership fingerprints or logs.

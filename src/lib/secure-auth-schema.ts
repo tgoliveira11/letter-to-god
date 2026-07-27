@@ -29,6 +29,7 @@ const REQUIRED_AUTH_TABLES = [
   "invite_codes",
   "invite_uses",
   "login_attempt_counters",
+  "user_preferences",
 ] as const;
 
 export class SecureAuthDatabaseNotReadyError extends Error {

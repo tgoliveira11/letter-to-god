@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { notesApi } from "@/lib/api-client/notes";
 import { noteVersionsApi } from "@/lib/api-client/note-versions";
 import { vaultApi } from "@/lib/api-client/vault";
@@ -22,7 +22,7 @@ import {
   restoreVaultIndexEntry,
   updateVaultIndexEntry,
 } from "@/lib/crypto-client/vault-index";
-import { getSessionVaultKey, generateDefaultNoteTitle } from "@/lib/crypto-client/vault";
+import { generateDefaultNoteTitle } from "@/lib/crypto-client/vault";
 import {
   duplicateNoteMetadata,
   metadataToIndexEntry,
@@ -35,22 +35,31 @@ import {
   type ResolvedReflection,
 } from "@/lib/notes/note-lifecycle";
 import { countChecklistItems } from "@/lib/notes/markdown-checklist";
+import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/application-state/async-ownership";
+import { assertVaultAsyncOwnershipCurrent, captureVaultAsyncOwnership } from "@/lib/application-state/vault-async-ownership";
+
+type AssertCurrent = () => void;
 
 async function syncVaultIndex(
   userId: string,
-  mutate: (index: ReturnType<typeof createEmptyVaultIndex>) => ReturnType<typeof createEmptyVaultIndex>
+  mutate: (index: ReturnType<typeof createEmptyVaultIndex>) => ReturnType<typeof createEmptyVaultIndex>,
+  assertCurrent: AssertCurrent = () => undefined,
+  vaultKey?: CryptoKey
 ) {
-  const vaultKey = getSessionVaultKey();
   if (!vaultKey) throw new Error("Vault is locked");
 
   const { encryptedVaultIndex } = await vaultApi.getIndex();
+  assertCurrent();
   const current = encryptedVaultIndex
     ? await decryptVaultIndex(encryptedVaultIndex, userId, vaultKey)
     : createEmptyVaultIndex();
+  assertCurrent();
 
   const next = mutate(current);
   const encrypted = await encryptVaultIndex(next, userId, vaultKey);
+  assertCurrent();
   await vaultApi.updateIndex(encrypted);
+  assertCurrent();
 }
 
 /**
@@ -66,7 +75,8 @@ async function appendNoteVersionSnapshot(
   noteId: string,
   metadata: NoteMetadataPlaintext,
   body: string,
-  wrappedKey: import("@/lib/validation/encrypted-payload").EncryptedPayload
+  wrappedKey: import("@/lib/validation/encrypted-payload").EncryptedPayload,
+  assertCurrent: AssertCurrent = () => undefined
 ): Promise<boolean> {
   try {
     const versionId = crypto.randomUUID();
@@ -78,21 +88,26 @@ async function appendNoteVersionSnapshot(
       body,
       wrappedKey
     );
+    assertCurrent();
     await noteVersionsApi.create(noteId, payload);
+    assertCurrent();
     return true;
-  } catch {
+  } catch (error) {
+    if (isAsyncOwnershipCancellation(error)) throw error;
     // History is additive; never block or surface the primary save.
     return false;
   }
 }
 
-async function loadNoteForUpdate(noteId: string) {
+async function loadNoteForUpdate(noteId: string, assertCurrent: AssertCurrent = () => undefined) {
   const note = await notesApi.get(noteId);
+  assertCurrent();
   const decrypted = await decryptNote(
     note.encryptedMetadata,
     note.encryptedBody,
     note.encryptedWrappedNoteKey
   );
+  assertCurrent();
   return { note, decrypted };
 }
 
@@ -102,7 +117,7 @@ async function persistMetadataUpdate(
   metadata: NoteMetadataPlaintext,
   body: string,
   wrappedKey: import("@/lib/validation/encrypted-payload").EncryptedPayload,
-  options?: { appendUpdatedEvent?: boolean }
+  options?: { appendUpdatedEvent?: boolean; assertCurrent?: AssertCurrent; vaultKey?: CryptoKey }
 ) {
   const now = new Date().toISOString();
   let updatedMetadata = { ...metadata, updatedAt: now };
@@ -119,14 +134,20 @@ async function persistMetadataUpdate(
     body,
     wrappedKey
   );
+  options?.assertCurrent?.();
   const note = await notesApi.update(noteId, payload);
+  options?.assertCurrent?.();
 
-  await syncVaultIndex(userId, (index) =>
-    updateVaultIndexEntry(
-      index,
-      noteId,
-      metadataToIndexEntry(noteId, updatedMetadata, body)
-    )
+  await syncVaultIndex(
+    userId,
+    (index) =>
+      updateVaultIndexEntry(
+        index,
+        noteId,
+        metadataToIndexEntry(noteId, updatedMetadata, body)
+      ),
+    options?.assertCurrent,
+    options?.vaultKey
   );
 
   return { metadata: updatedMetadata, note };
@@ -135,17 +156,26 @@ async function persistMetadataUpdate(
 export function useNotes(userId: string | null) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ownershipRef = useRef(new AsyncOwnershipController());
 
   const createNote = useCallback(
     async (input: Omit<EncryptNoteInput, "title"> & { title?: string }) => {
       if (!userId) throw new Error("Not authenticated");
+      const noteId = crypto.randomUUID();
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () =>
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const noteId = crypto.randomUUID();
         const title = input.title?.trim() || generateDefaultNoteTitle();
         const payload = await encryptNote(userId, noteId, { ...input, title });
+        assertCurrent();
         const note = await notesApi.create({ id: noteId, ...payload });
+        assertCurrent();
 
         await appendNoteVersionSnapshot(
           userId,
@@ -164,13 +194,16 @@ export function useNotes(userId: string | null) {
             updatedAt: note.updatedAt,
           }),
           input.body,
-          payload.encryptedWrappedNoteKey
+          payload.encryptedWrappedNoteKey,
+          assertCurrent
         );
 
-        await syncVaultIndex(userId, (index) =>
-          addVaultIndexEntry(
-            index,
-            metadataToIndexEntry(noteId, {
+        await syncVaultIndex(
+          userId,
+          (index) =>
+            addVaultIndexEntry(
+              index,
+              metadataToIndexEntry(noteId, {
               title,
               categoryId: input.categoryId ?? null,
               tagIds: input.tagIds ?? [],
@@ -182,17 +215,21 @@ export function useNotes(userId: string | null) {
               trashedAt: input.trashedAt ?? null,
               createdAt: note.createdAt,
               updatedAt: note.updatedAt,
-            }, input.body)
-          )
+              }, input.body)
+            ),
+          assertCurrent,
+          ownership.lease.vaultKey
         );
 
         return { ...note, encryptedWrappedNoteKey: payload.encryptedWrappedNoteKey };
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to create note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          const message = e instanceof Error ? e.message : "Failed to create note";
+          setError(message);
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -206,26 +243,38 @@ export function useNotes(userId: string | null) {
       existingWrappedKey: import("@/lib/validation/encrypted-payload").EncryptedPayload
     ) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+        encryptedKeyFingerprint: `${existingWrappedKey.version}:${existingWrappedKey.iv}:${existingWrappedKey.ciphertext}`,
+      });
+      const assertCurrent = () =>
+        assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
         const result = await persistMetadataUpdate(userId, noteId, metadata, body, existingWrappedKey, {
           appendUpdatedEvent: true,
+          assertCurrent,
+          vaultKey: ownership.lease.vaultKey,
         });
         await appendNoteVersionSnapshot(
           userId,
           noteId,
           result.metadata,
           body,
-          existingWrappedKey
+          existingWrappedKey,
+          assertCurrent
         );
         return result.note;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to update note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          const message = e instanceof Error ? e.message : "Failed to update note";
+          setError(message);
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -234,10 +283,15 @@ export function useNotes(userId: string | null) {
   const moveNoteToTrash = useCallback(
     async (noteId: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const now = new Date().toISOString();
         const updatedMetadata: NoteMetadataPlaintext = {
           ...decrypted.metadata,
@@ -252,15 +306,17 @@ export function useNotes(userId: string | null) {
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to move note to trash";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to move note to trash");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -269,10 +325,15 @@ export function useNotes(userId: string | null) {
   const restoreNoteFromTrash = useCallback(
     async (noteId: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const now = new Date().toISOString();
         const updatedMetadata: NoteMetadataPlaintext = {
           ...decrypted.metadata,
@@ -286,16 +347,23 @@ export function useNotes(userId: string | null) {
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
-        await syncVaultIndex(userId, (index) => restoreVaultIndexEntry(index, noteId));
+        await syncVaultIndex(
+          userId,
+          (index) => restoreVaultIndexEntry(index, noteId),
+          assertCurrent,
+          ownership.lease.vaultKey
+        );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to restore note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to restore note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -304,18 +372,30 @@ export function useNotes(userId: string | null) {
   const permanentlyDeleteNote = useCallback(
     async (noteId: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
         await notesApi.delete(noteId);
-        await syncVaultIndex(userId, (index) => removeVaultIndexEntry(index, noteId));
+        assertCurrent();
+        await syncVaultIndex(
+          userId,
+          (index) => removeVaultIndexEntry(index, noteId),
+          assertCurrent,
+          ownership.lease.vaultKey
+        );
         return { success: true as const };
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to delete note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to delete note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -327,10 +407,15 @@ export function useNotes(userId: string | null) {
   const toggleNoteResolved = useCallback(
     async (noteId: string, answered: boolean) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const updatedMetadata = answered
           ? applyNoteResolved(decrypted.metadata, decrypted.metadata.resolvedReflection)
           : applyNoteReopened(decrypted.metadata);
@@ -339,15 +424,17 @@ export function useNotes(userId: string | null) {
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to update note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to update note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -363,10 +450,15 @@ export function useNotes(userId: string | null) {
       } | null
     ) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const reflection: ResolvedReflection | null = reflectionFields
           ? buildResolvedReflection(reflectionFields)
           : null;
@@ -376,15 +468,17 @@ export function useNotes(userId: string | null) {
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to resolve note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to resolve note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -393,25 +487,32 @@ export function useNotes(userId: string | null) {
   const toggleNotePinned = useCallback(
     async (noteId: string, pinned: boolean) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const updatedMetadata = { ...decrypted.metadata, pinned };
         const result = await persistMetadataUpdate(
           userId,
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to update note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to update note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -420,25 +521,32 @@ export function useNotes(userId: string | null) {
   const toggleNoteFavorite = useCallback(
     async (noteId: string, favorite: boolean) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const updatedMetadata = { ...decrypted.metadata, favorite };
         const result = await persistMetadataUpdate(
           userId,
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to update note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to update note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -447,10 +555,15 @@ export function useNotes(userId: string | null) {
   const toggleNoteArchived = useCallback(
     async (noteId: string, archived: boolean) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted, note } = await loadNoteForUpdate(noteId);
+        const { decrypted, note } = await loadNoteForUpdate(noteId, assertCurrent);
         const updatedMetadata = {
           ...decrypted.metadata,
           archived,
@@ -465,15 +578,17 @@ export function useNotes(userId: string | null) {
           noteId,
           updatedMetadata,
           decrypted.body,
-          note.encryptedWrappedNoteKey
+          note.encryptedWrappedNoteKey,
+          { assertCurrent, vaultKey: ownership.lease.vaultKey }
         );
         return result.metadata;
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to update note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to update note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]
@@ -482,10 +597,15 @@ export function useNotes(userId: string | null) {
   const duplicateNote = useCallback(
     async (noteId: string) => {
       if (!userId) throw new Error("Not authenticated");
+      const ownership = captureVaultAsyncOwnership(ownershipRef.current, {
+        ownerId: userId,
+        resourceId: `note:${noteId}:duplicate`,
+      });
+      const assertCurrent = () => assertVaultAsyncOwnershipCurrent(ownershipRef.current, ownership);
       setBusy(true);
       setError(null);
       try {
-        const { decrypted } = await loadNoteForUpdate(noteId);
+        const { decrypted } = await loadNoteForUpdate(noteId, assertCurrent);
         const newNoteId = crypto.randomUUID();
         const now = new Date().toISOString();
         const metadata = duplicateNoteMetadata(decrypted.metadata, decrypted.body, now, now);
@@ -503,22 +623,29 @@ export function useNotes(userId: string | null) {
           createdAt: metadata.createdAt,
           updatedAt: metadata.updatedAt,
         });
+        assertCurrent();
         const note = await notesApi.create({ id: newNoteId, ...payload });
+        assertCurrent();
 
-        await syncVaultIndex(userId, (index) =>
-          addVaultIndexEntry(
-            index,
-            metadataToIndexEntry(newNoteId, metadata, decrypted.body)
-          )
+        await syncVaultIndex(
+          userId,
+          (index) =>
+            addVaultIndexEntry(
+              index,
+              metadataToIndexEntry(newNoteId, metadata, decrypted.body)
+            ),
+          assertCurrent,
+          ownership.lease.vaultKey
         );
 
         return { noteId: newNoteId, note };
       } catch (e) {
-        const message = e instanceof Error ? e.message : "Failed to duplicate note";
-        setError(message);
+        if (!isAsyncOwnershipCancellation(e)) {
+          setError(e instanceof Error ? e.message : "Failed to duplicate note");
+        }
         throw e;
       } finally {
-        setBusy(false);
+        if (ownershipRef.current.isCurrent(ownership.token)) setBusy(false);
       }
     },
     [userId]

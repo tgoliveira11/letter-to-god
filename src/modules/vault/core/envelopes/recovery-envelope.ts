@@ -5,7 +5,11 @@ import {
   type EncryptedPayload as VaultCoreEncryptedPayload,
   type KdfMetadata as VaultCoreKdfMetadata,
 } from "@tgoliveira/vault-core";
-import { cacheVaultInnerKeyMaterialAfterRecoveryUnlock } from "@tgoliveira/vault-core/browser";
+import {
+  assertVaultSessionOperationCurrent,
+  cacheVaultInnerKeyMaterialAfterRecoveryUnlock,
+  type VaultSessionOperation,
+} from "@tgoliveira/vault-core/browser";
 import type { EncryptedPayload, KdfMetadata } from "@/lib/validation/encrypted-payload";
 import {
   setUnlockedVaultSession,
@@ -55,6 +59,7 @@ export async function unwrapVaultKeyFromRecoveryPhrase(
     userId?: string;
     resourceId?: string;
     expectedWordCount?: 12 | 24 | null;
+    operation?: VaultSessionOperation;
   }
 ): Promise<CryptoKey> {
   const scope = envelopeScope(options?.userId ?? encryptedVaultKey.aad.userId, options?.resourceId);
@@ -70,15 +75,20 @@ export async function unwrapVaultKeyFromRecoveryPhrase(
     SELAHKEEP_VAULT_PROFILE,
     { expectedWordCount: options?.expectedWordCount ?? null }
   );
+  if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
 
   if (kdfMetadata.kdf === "argon2id") {
-    await cacheVaultInnerKeyMaterialAfterRecoveryUnlock(vaultKey, envelope, recoveryPhrase);
+    await cacheVaultInnerKeyMaterialAfterRecoveryUnlock(vaultKey, envelope, recoveryPhrase, {
+      operation: options?.operation,
+    });
+    if (options?.operation) assertVaultSessionOperationCurrent(options.operation);
   }
 
   if (options?.applySession ?? true) {
     await setUnlockedVaultSession({
       userVaultKey: vaultKey,
       method: options?.unlockMethod ?? "recovery_phrase",
+      operation: options?.operation,
     });
   }
   return vaultKey;

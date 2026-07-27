@@ -103,6 +103,11 @@ export const recoveryPhraseReplaceSchema = z.object({
     .optional(),
 });
 
+export const passwordEnvelopeReplaceSchema = z.object({
+  encryptedVaultKey: encryptedPayloadSchema,
+  kdfMetadata: kdfMetadataSchema,
+});
+
 export const unlockWithRecoveryCodeSchema = z.object({
   encryptedVaultKey: encryptedPayloadSchema,
   kdfMetadata: kdfMetadataSchema,
@@ -117,6 +122,7 @@ export type VaultSetupInput = z.infer<typeof vaultSetupSchema>;
 export type VaultInitInput = z.infer<typeof vaultInitSchema>;
 export type RecoveryCodeInput = z.infer<typeof recoveryCodeSchema>;
 export type RecoveryPhraseReplaceInput = z.infer<typeof recoveryPhraseReplaceSchema>;
+export type PasswordEnvelopeReplaceInput = z.infer<typeof passwordEnvelopeReplaceSchema>;
 
 export const ALLOWED_ENCRYPTED_PREFIXES = [
   "encrypted",

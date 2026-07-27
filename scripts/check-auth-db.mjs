@@ -50,6 +50,7 @@ const requiredTables = [
   "user_two_factor_login_tokens",
   "user_two_factor_session_upgrades",
   "user_two_factor_backup_codes",
+  "user_preferences",
 ];
 
 const sql = postgres(connectionString, { max: 1 });
