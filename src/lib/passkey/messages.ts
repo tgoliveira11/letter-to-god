@@ -11,10 +11,13 @@ export function passkeyPrfDiagnosticMessage(reason: PasskeyPrfDiagnosticReason):
 }
 
 export const PASSKEY_ORPHAN_CREDENTIAL_NOTE =
-  "Your device may still show a passkey created by the browser, but it was not registered by this app for vault recovery.";
+  "The passkey was registered, but no vault envelope was created. You can confirm it later from Vault settings or remove the unused credential.";
 
 export const PASSKEY_VAULT_REGISTERED_MESSAGE =
-  "Passkey registered. You can unlock your vault on a new device with your passkey.";
+  "Passkey registered and authentication-confirmed. You can unlock your vault with this passkey.";
+
+export const PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE =
+  "The passkey was created, but vault unlock was not enabled because its confirmation was cancelled. You can finish from Vault settings.";
 
 export type PasskeySetupOutcome =
   | "idle"
@@ -41,7 +44,7 @@ export const PASSKEY_VAULT_UNLOCK_NOT_CONFIGURED_MESSAGE =
   "Passkey vault unlock is not configured yet.";
 
 export const PASSKEY_VAULT_UNLOCK_CONFIGURED_ON_ANOTHER_DEVICE_MESSAGE =
-  "Passkey vault unlock is set up on another device. Add a passkey for this device in vault settings.";
+  "Passkey vault unlock is configured but this browser has not selected a working variant yet. Try the same synced passkey; if it does not match, Vault settings will guide you through compatibility confirmation.";
 
 export const PASSKEY_ACCOUNT_ONLY_FOR_SIGN_IN_MESSAGE =
   "This passkey is for account sign-in, not vault unlock.";
@@ -63,11 +66,11 @@ export const PASSKEY_UNLOCK_DECRYPT_FAILED_MESSAGE =
 
 /** Shown when WebAuthn succeeds but PRF bytes do not match the stored vault envelope. */
 export const PASSKEY_UNLOCK_PRF_MISMATCH_MESSAGE =
-  "This passkey completed vault unlock authentication, but it could not derive the vault key on this device. Vault passkey unlock requires PRF output from the same provider and device where you enabled it. Unlock with your vault password or recovery phrase, or add a passkey for this device from /vault/settings while your vault is open.";
+  "This passkey authenticated, but its PRF output did not match a saved vault variant. Use your vault password or recovery phrase, then confirm compatibility for this same passkey in Vault settings.";
 
-/** iPhone/iPad decrypt failure — per-device PRF and iCloud Keychain guidance. */
+/** iPhone/iPad decrypt failure — synced-credential compatibility guidance. */
 export const PASSKEY_UNLOCK_PRF_MISMATCH_APPLE_HINT_MESSAGE =
-  "This passkey authenticated, but it could not unlock your vault on this iPhone or iPad. Vault passkey unlock is per device: set it up on the same phone or tablet where you want to unlock (Settings → passkey vault unlock → Add a passkey for this device). If you use Enpass or another password manager for account sign-in, try iCloud Keychain (Face ID / Touch ID) instead. You can also unlock with your vault password or recovery phrase.";
+  "This passkey authenticated, but it did not match a saved vault variant on this iPhone or iPad. Unlock with your vault password or recovery phrase, then confirm compatibility for the same synced passkey in Vault settings. If your password manager does not support WebAuthn PRF here, try a PRF-compatible provider such as iCloud Keychain.";
 
 /** Shown when the OS is too old for mobile WebAuthn PRF (iOS/iPadOS before 18). */
 export const PASSKEY_UNLOCK_IOS_PRF_TOO_OLD_MESSAGE =

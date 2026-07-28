@@ -15,18 +15,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- **Unified account/vault passkeys.** An explicitly opted-in account passkey can reuse its registration ceremony for vault unlock, and an already dual-capability passkey can open the vault locally after secure-auth finishes the account session. Account auth and vault access remain independently usable.
+- **Unified account/vault passkeys.** An explicitly opted-in account passkey can serve both account sign-in and vault unlock after an exact post-registration authentication confirmation. An already dual-capability passkey can open the vault locally after secure-auth finishes the account session. Account auth and vault access remain independently usable.
 
 ### Changed
 
-- **Dependency baseline.** Pinned `@tgoliveira/vault-core@1.6.0` and `@tgoliveira/secure-auth@0.8.0`.
-- **Passkey registration UX.** Vault enrollment uses registration-time PRF output when available, avoiding the previous second passkey prompt; a typed authentication fallback remains for compatible authenticators that omit registration output.
+- **Dependency baseline.** Adopted `@tgoliveira/vault-core@1.6.1` and retained `@tgoliveira/secure-auth@0.8.0`.
+- **Authentication-confirmed passkey enrollment.** Registration detects capability only. Vault-only setup, recovery setup, and optional account-passkey composition now require one exact, user-mediated authentication ceremony before the first durable envelope is wrapped or persisted.
+- **Guided synced-passkey repair.** A candidate `no_match` leads directly to compatibility confirmation for the same logical credential. The user supplies an independent vault password or recovery phrase locally before one explicit WebAuthn prompt; known-good variants remain append-only.
 - **Explicit vs quick unlock.** Full unlock always uses the active credential allow-list, while dock quick unlock remains an exact browser-binding optimization.
 
 ### Security
 
 - **Shared WebAuthn counter CAS.** Migration `0023_secure_auth_passkey_counter_revision.sql` adds revisioned compare-and-set updates, including counterless authenticators, across secure-auth and product vault verification.
-- **Independent compatibility repair.** Synced-passkey `no_match` repair now requires a local vault password or recovery phrase through vault-core 1.6.0; it cannot rely on a session UVK or browser binding alone.
+- **Independent compatibility repair.** Synced-passkey `no_match` repair requires a local vault password or recovery phrase through vault-core 1.6.1, even while the vault is locked; it cannot rely on a session UVK or browser binding alone.
+- **Registration PRF is non-authoritative.** Registration responses and account-registration routes no longer issue a persistence receipt. Only a sanitized, server-verified assertion for the exact credential can mint the single-use proof consumed by envelope persistence. New variants carry `publicMetadata.prfCeremony = "authentication"`; legacy variants remain readable and are flagged for guided confirmation.
 - **Browser-only PRF interop.** secure-auth owns account assertion sanitization, verification, and counter updates. SelahKeep receives only the verified credential ID after the final session and keeps PRF bytes exclusively in browser memory.
 - **Emergency mode off.** The vault-core emergency/duress UI gate is explicitly disabled in SelahKeep; no emergency state or controls are exposed.
 

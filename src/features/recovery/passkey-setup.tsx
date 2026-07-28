@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  startAuthentication,
   startRegistration,
   type PublicKeyCredentialCreationOptionsJSON,
   type PublicKeyCredentialRequestOptionsJSON,
@@ -13,23 +12,18 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SuccessState } from "@/components/ui/success-state";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
 import {
-  extractPasskeyPrfOutput,
   unlockVaultFromPasskeyEnvelopeCandidates,
   wrapVaultKeyForPasskey,
 } from "@/lib/crypto-client/passkey-vault";
 import { apiClient } from "@/lib/api-client/client";
 import { passkeysApi } from "@/lib/api-client/passkeys";
-import {
-  prepareAuthenticationOptions,
-  prepareVaultRegistrationOptions,
-} from "@/lib/passkey/prepare-webauthn-options";
+import { prepareVaultRegistrationOptions } from "@/lib/passkey/prepare-webauthn-options";
 import { toPasskeyRegistrationErrorMessage } from "@/lib/passkey/webauthn-config";
 import {
   getPasskeyPrfDiagnosticHeadline,
   getPasskeyPrfDiagnosticMessage,
   isCeremonyCancellation,
   probePasskeyPrfEnvironmentAsync,
-  resolveCeremonyDiagnosticReason,
   resolvePreCeremonyDiagnosticReason,
   shouldBlockPasskeyVaultSetupBeforeCeremony,
   type PasskeyPrfDiagnosticReason,
@@ -38,25 +32,26 @@ import { setPasskeyLoginHint } from "@/lib/passkey/login-hint";
 import { currentDeviceLabel } from "@/lib/passkey/device-label";
 import {
   PASSKEY_ORPHAN_CREDENTIAL_NOTE,
+  PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE,
   PASSKEY_VAULT_REGISTERED_MESSAGE,
   type PasskeySetupOutcome,
 } from "@/lib/passkey/messages";
 import { persistVaultPasskeyBinding } from "@/lib/passkey/vault-unlock-authenticate";
-import {
-  resolvePasskeyPrfCapability,
-  sanitizeWebAuthnResponseForServer,
-} from "@/lib/crypto-client/vault-passkey-browser";
+import { sanitizeWebAuthnResponseForServer } from "@/lib/crypto-client/vault-passkey-browser";
 import type { EncryptedPayload as VaultCoreEncryptedPayload } from "@tgoliveira/vault-core";
 import {
   assertVaultSessionLeaseCurrent,
   assertVaultSessionOperationCurrent,
-  resolvePasskeyPrfEnrollmentAfterRegistration,
   VaultSessionOperationCancelledError,
 } from "@tgoliveira/vault-core/browser";
 import {
   beginVaultOwnerOperation,
   getCurrentVaultSessionLease,
 } from "@/lib/crypto-client/vault-session";
+import {
+  PasskeyAuthenticationPrfUnavailableError,
+  runAuthenticationConfirmedPasskeyEnrollment,
+} from "@/lib/passkey/authentication-confirmed-enrollment";
 
 interface PasskeySetupProps {
   userId: string;
@@ -83,6 +78,7 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
 
   async function handleRegisterPasskey() {
     let ownedPrfOutput: Uint8Array | null = null;
+    let registrationVerified = false;
     setLoading(true);
     setError(null);
     setMessage(null);
@@ -134,7 +130,6 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         credentialId?: string;
         verifiedCredentialId?: string;
         credentialDbId?: string;
-        enrollmentProof?: string;
       }>("/api/passkeys/register", {
         action: "verify",
         response: sanitizeWebAuthnResponseForServer(attestation),
@@ -145,79 +140,29 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
       const credentialDbId = registration.credentialDbId;
       if (
         !credentialDbId ||
-        !registration.enrollmentProof ||
         registration.verifiedCredentialId !== attestation.id
       ) {
         throw new Error("Passkey registration failed");
       }
-      const registrationEnrollment = resolvePasskeyPrfEnrollmentAfterRegistration({
-        registrationCredentialId: attestation.id,
-        verifiedCredentialId: registration.verifiedCredentialId,
-        clientExtensionResults: attestation.clientExtensionResults as Record<string, unknown>,
-      });
-
+      registrationVerified = true;
       const enablePath = `/api/account/passkeys/${credentialDbId}/enable-vault-unlock`;
-      let verifiedCredentialId = registration.verifiedCredentialId;
-      let enrollmentProof = registration.enrollmentProof;
-
-      if (registrationEnrollment.status === "ready") {
-        ownedPrfOutput = registrationEnrollment.prfOutput;
-      } else if (registrationEnrollment.status === "authentication_required") {
-        const enableOptions = (await apiClient.post(enablePath, {
-          action: "options",
-        })) as PublicKeyCredentialRequestOptionsJSON;
-
-        let assertion;
-        try {
-          assertion = await startAuthentication({
-            optionsJSON: prepareAuthenticationOptions(enableOptions),
-          });
-        } catch (ceremonyError) {
-          if (isCeremonyCancellation(ceremonyError)) {
-            setOutcome("cancelled");
-            setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
-            return;
-          }
-          throw ceremonyError;
-        }
-
-        const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
-        const authenticationEnrollment = await apiClient.post<{
-          verified: true;
-          verifiedCredentialId: string;
-          enrollmentProof: string;
-        }>(enablePath, {
-          action: "verify",
-          response: sanitizeWebAuthnResponseForServer(assertion),
-        });
-        if (authenticationEnrollment.verifiedCredentialId !== assertion.id) {
-          throw new Error("Verified passkey credential mismatch.");
-        }
-        const capability = resolvePasskeyPrfCapability({
-          ceremony: "authentication",
-          verifiedCredentialId: authenticationEnrollment.verifiedCredentialId,
-          clientExtensionResults,
-        });
-        ownedPrfOutput = extractPasskeyPrfOutput(
-          clientExtensionResults,
-          authenticationEnrollment.verifiedCredentialId
-        );
-        if (capability.state !== "confirmed_authentication" || !ownedPrfOutput) {
-          showDiagnosticOutcome(resolveCeremonyDiagnosticReason({ prfOutputPresent: false }), {
-            attemptedRegistration: true,
-          });
-          return;
-        }
-        verifiedCredentialId = authenticationEnrollment.verifiedCredentialId;
-        enrollmentProof = authenticationEnrollment.enrollmentProof;
-      } else {
-        showDiagnosticOutcome(resolveCeremonyDiagnosticReason({ prfOutputPresent: false }), {
-          attemptedRegistration: true,
-        });
-        return;
-      }
-
-      const prfOutput = ownedPrfOutput;
+      const authenticationEnrollment = await runAuthenticationConfirmedPasskeyEnrollment({
+        userId,
+        registrationCredentialId: attestation.id,
+        verifiedRegistrationCredentialId: registration.verifiedCredentialId,
+        registrationClientExtensionResults:
+          attestation.clientExtensionResults as Record<string, unknown>,
+        requestAuthenticationOptions: async () =>
+          apiClient.post<PublicKeyCredentialRequestOptionsJSON>(enablePath, {
+            action: "options",
+          }),
+        verifyAuthentication: async (_verifiedCredentialId, response) =>
+          apiClient.post(enablePath, { action: "verify", response }),
+      });
+      assertVaultSessionOperationCurrent(operation);
+      ownedPrfOutput = authenticationEnrollment.prfOutput;
+      const prfOutput = authenticationEnrollment.prfOutput;
+      const verifiedCredentialId = authenticationEnrollment.verifiedCredentialId;
 
       const encryptedVaultKey = await wrapVaultKeyForPasskey(
         vaultKey,
@@ -235,7 +180,7 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
         bindingProof: string;
       }>(enablePath, {
         action: "persist",
-        enrollmentProof,
+        enrollmentProof: authenticationEnrollment.enrollmentProof,
         encryptedVaultKey,
         prfSupported: true,
       });
@@ -255,6 +200,7 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
               publicMetadata: {
                 credentialId: result.verifiedCredentialId,
                 prfRequired: true,
+                prfCeremony: "authentication",
               },
             },
           }],
@@ -283,9 +229,17 @@ export function PasskeySetup({ userId, hasPasskey, onStatusChange }: PasskeySetu
       }
     } catch (e) {
       if (e instanceof VaultSessionOperationCancelledError) return;
+      if (e instanceof PasskeyAuthenticationPrfUnavailableError) {
+        showDiagnosticOutcome("prf_not_returned", { attemptedRegistration: true });
+        return;
+      }
       if (isCeremonyCancellation(e)) {
         setOutcome("cancelled");
-        setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
+        setError(
+          registrationVerified
+            ? PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE
+            : getPasskeyPrfDiagnosticMessage("ceremony_cancelled")
+        );
         return;
       }
       if (e instanceof Error && e.name === "NotSupportedError") {

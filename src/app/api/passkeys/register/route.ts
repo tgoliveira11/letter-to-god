@@ -5,7 +5,6 @@ import { apiError, parseJsonBody } from "@/lib/api-helpers";
 import { getClientIp } from "@/lib/request-ip";
 import { z } from "zod";
 import { rejectPasskeyVaultForbiddenFields } from "@/server/policies/passkey-vault-plaintext-rejection";
-import { passkeyVaultEnvelopeService } from "@/server/services/passkey-vault-envelope-service";
 
 const verifySchema = z.object({
   action: z.enum(["options", "verify"]),
@@ -52,13 +51,6 @@ export async function POST(request: Request) {
         friendlyName: parsed.data.friendlyName,
       }
     );
-    if (parsed.data.vaultOnly && result.verifiedCredentialId) {
-      const enrollment = await passkeyVaultEnvelopeService.issueRegistrationEnrollmentProof(
-        user.id,
-        result.verifiedCredentialId
-      );
-      return NextResponse.json({ ...result, enrollmentProof: enrollment.enrollmentProof });
-    }
     return NextResponse.json(result);
   } catch (error) {
     return apiError(error, "POST /api/passkeys/register");

@@ -85,7 +85,7 @@ Passkeys authenticate the account separately from vault decryption. A passkey un
 | `GET` | `/api/passkeys/vault-unlock` | Session |
 | `DELETE` | `/api/passkeys/vault-unlock` | Fully authenticated session; bulk-remove vault passkey capabilities/envelopes/bindings, preserving account sign-in passkeys |
 | `POST` | `/api/passkeys/authenticate` | Session (actions `options`, `verify`, `bind`; `purpose: vault_unlock`) |
-| `POST` | `/api/passkeys/account-registration-vault` | Fully authenticated session + short-lived HttpOnly registration proof; ciphertext only |
+| `POST` | `/api/passkeys/account-registration-vault` | Fully authenticated session; actions `options`, `verify`, `persist`; exact authentication proof and ciphertext only |
 | `POST` | `/api/passkeys/account-login-vault-candidates` | Fully authenticated final session; encrypted candidates only |
 | `DELETE` | `/api/passkeys/authenticate` | Session; unbind current browser only |
 | `DELETE` | `/api/passkeys` | Legacy alias for bulk vault-passkey removal; never removes account sign-in capability |

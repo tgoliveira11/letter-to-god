@@ -3,10 +3,13 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
 import {
+  prepareVaultPasskeyPrfAuthenticationOptions,
   prepareVaultPasskeyPrfRegistrationOptions,
   prepareWebAuthnPrfExtensions,
   type PublicKeyCredentialCreationOptionsInput,
+  type PublicKeyCredentialRequestOptionsInput,
 } from "@tgoliveira/vault-core/browser";
+import type { PasskeyCredentialSelection } from "@tgoliveira/vault-core";
 import { SELAHKEEP_PRF_SALT_PREFIX } from "@/modules/vault/selahkeep-profile";
 
 export { alignPrfExtensionsForCredential as alignPrfExtensionsForAllowCredentials } from "@tgoliveira/vault-core/browser";
@@ -40,6 +43,20 @@ export async function prepareVaultRegistrationOptions(
     prfSaltPrefix: SELAHKEEP_PRF_SALT_PREFIX,
     serverOptions: options as unknown as PublicKeyCredentialCreationOptionsInput,
   }) as unknown as PublicKeyCredentialCreationOptionsJSON;
+}
+
+/** Full vault-core PRF preparation for an authentication ceremony. */
+export async function prepareVaultAuthenticationOptions(
+  options: PublicKeyCredentialRequestOptionsJSON,
+  userId: string,
+  credentialSelection?: PasskeyCredentialSelection
+): Promise<PublicKeyCredentialRequestOptionsJSON> {
+  return (await prepareVaultPasskeyPrfAuthenticationOptions({
+    userId,
+    prfSaltPrefix: SELAHKEEP_PRF_SALT_PREFIX,
+    serverOptions: options as unknown as PublicKeyCredentialRequestOptionsInput,
+    credentialSelection,
+  })) as unknown as PublicKeyCredentialRequestOptionsJSON;
 }
 
 export function prepareAuthenticationOptions(

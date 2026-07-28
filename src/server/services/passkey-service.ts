@@ -41,6 +41,7 @@ import {
   vaultBindingProofAudience,
 } from "@/lib/passkey/challenge-audiences";
 import { resolvePasskeyCounterAdvance } from "@/lib/passkey/passkey-counter";
+import { isAuthenticationConfirmedPasskeyVariant } from "@/lib/passkey/passkey-envelope-variant-metadata";
 
 const rpName = getWebAuthnRpName();
 const rpID = getWebAuthnRpId();
@@ -59,10 +60,10 @@ type PasskeyRegistrationOptions = {
 };
 
 /**
- * Random per-registration WebAuthn user handle for vault-only passkeys. Distinct
- * handles let multiple vault passkeys (one per device) coexist without a synced
- * provider overwriting one another, and stay separate from the account passkey handle
- * (the userId) so adding an account passkey never replaces a vault passkey.
+ * Random per-registration WebAuthn user handle for independent vault-only credentials. Distinct
+ * handles let credentials from separate providers or authenticators coexist without replacement,
+ * and stay separate from the account passkey handle (the userId). A synced passkey remains one
+ * logical credential across browsers and may own several envelope variants.
  */
 export function vaultPasskeyUserHandle(): Uint8Array<ArrayBuffer> {
   const handle = new Uint8Array(new ArrayBuffer(32));
@@ -563,6 +564,9 @@ export const passkeyService = {
           credential.id,
           credential.credentialId
         );
+        const authenticationConfirmedVariantCount = variants.filter(
+          isAuthenticationConfirmedPasskeyVariant
+        ).length;
         return {
           id: credential.id,
           friendlyName: credential.friendlyName ?? "Vault passkey",
@@ -574,6 +578,9 @@ export const passkeyService = {
           backupEligible: credential.backupEligible,
           credentialBackedUp: credential.credentialBackedUp,
           activeEnvelopeVariantCount: variants.length,
+          authenticationConfirmedVariantCount,
+          needsCompatibilityConfirmation:
+            variants.length > 0 && authenticationConfirmedVariantCount === 0,
         };
       })
     );
@@ -591,6 +598,8 @@ export const passkeyService = {
           backupEligible: boolean | null;
           credentialBackedUp: boolean | null;
           activeEnvelopeVariantCount: number;
+          authenticationConfirmedVariantCount: number;
+          needsCompatibilityConfirmation: boolean;
         }>,
         deviceBindings: deviceBindings.map((binding) => ({
           id: binding.id,

@@ -158,7 +158,7 @@ describe("unlockVaultWithPasskey", () => {
   it("does not mutate routing when no candidate matches", async () => {
     mocks.unlockCandidates.mockResolvedValue({ status: "no_match", attemptedCandidates: 1 });
     await expect(unlockVaultWithPasskey(USER_ID)).rejects.toThrow(
-      "completed vault unlock authentication"
+      "confirm compatibility for this same passkey"
     );
     expect(mocks.persistBinding).not.toHaveBeenCalled();
   });

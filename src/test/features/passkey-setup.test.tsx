@@ -68,6 +68,7 @@ vi.mock("@/lib/passkey/prepare-webauthn-options", () => ({
   prepareRegistrationOptions: (options: unknown) => options,
   prepareVaultRegistrationOptions: (options: unknown) => options,
   prepareAuthenticationOptions: (options: unknown) => options,
+  prepareVaultAuthenticationOptions: (options: unknown) => options,
   alignPrfExtensionsForAllowCredentials: (options: unknown) => options,
 }));
 
@@ -99,7 +100,6 @@ describe("PasskeySetup", () => {
           credentialId: "cred-id",
           verifiedCredentialId: "cred-id",
           credentialDbId: "pk-new",
-          enrollmentProof: "registration-enrollment-proof",
         };
       }
       if (path.endsWith("/enable-vault-unlock") && body?.action === "options") {
@@ -129,18 +129,25 @@ describe("PasskeySetup", () => {
       }
       return {};
     });
+    const registrationPrf = new Uint8Array(32).fill(1);
+    const authenticationPrf = new Uint8Array(32).fill(2);
     mocks.startRegistration.mockResolvedValue({
       id: "cred-id",
       clientExtensionResults: {
-        prf: { enabled: true, results: { first: new ArrayBuffer(32) } },
+        prf: { enabled: true, results: { first: registrationPrf.buffer } },
       },
     });
     mocks.startAuthentication.mockResolvedValue({
       id: "cred-id",
-      clientExtensionResults: { prf: { results: { first: new ArrayBuffer(32) } } },
+      clientExtensionResults: { prf: { results: { first: authenticationPrf.buffer } } },
     });
-    mocks.extractPasskeyPrfOutput.mockReturnValue(new Uint8Array(32));
-    mocks.wrapVaultKeyForPasskey.mockResolvedValue({ version: "enc-v1" });
+    mocks.extractPasskeyPrfOutput.mockReturnValue(authenticationPrf);
+    mocks.wrapVaultKeyForPasskey.mockImplementation(
+      async (_vaultKey: CryptoKey, prfOutput: Uint8Array) => {
+        expect(prfOutput[0]).toBe(2);
+        return { version: "enc-v1" };
+      }
+    );
     mocks.resolveCapability.mockReturnValue({ state: "confirmed_authentication" });
     mocks.unlockCandidates.mockResolvedValue({
       status: "matched",
@@ -151,7 +158,7 @@ describe("PasskeySetup", () => {
     window.confirm = vi.fn(() => true);
   });
 
-  it("registers passkey vault envelope when PRF output is available", async () => {
+  it("ignores registration PRF and persists only after exact authentication confirmation", async () => {
     const onStatusChange = vi.fn();
     render(<PasskeySetup userId={USER_ID} hasPasskey={false} onStatusChange={onStatusChange} />);
 
@@ -169,14 +176,23 @@ describe("PasskeySetup", () => {
         vaultOnly: true,
         friendlyName: expect.any(String),
       });
-      // Registration-time PRF output avoids a second WebAuthn prompt.
-      expect(mocks.startAuthentication).not.toHaveBeenCalled();
+      expect(mocks.startAuthentication).toHaveBeenCalledTimes(1);
+      expect(mocks.wrapVaultKeyForPasskey).toHaveBeenCalled();
+      expect(mocks.apiPost).toHaveBeenCalledWith(
+        "/api/account/passkeys/pk-new/enable-vault-unlock",
+        {
+          action: "verify",
+          response: expect.not.objectContaining({
+            clientExtensionResults: expect.objectContaining({ prf: expect.anything() }),
+          }),
+        }
+      );
       expect(mocks.apiPost).toHaveBeenCalledWith(
         "/api/account/passkeys/pk-new/enable-vault-unlock",
         expect.objectContaining({
           action: "persist",
           encryptedVaultKey: { version: "enc-v1" },
-          enrollmentProof: "registration-enrollment-proof",
+          enrollmentProof: "enrollment-proof",
         })
       );
       expect(mocks.apiPost).toHaveBeenCalledWith(
@@ -242,6 +258,20 @@ describe("PasskeySetup", () => {
 
     expect(await screen.findByText(/passkey prompt was dismissed/i)).toBeTruthy();
     expect(screen.queryByText(/did not return PRF output/i)).toBeNull();
+  });
+
+  it("explains that registration succeeded when authentication confirmation is cancelled", async () => {
+    mocks.startAuthentication.mockRejectedValue(
+      Object.assign(new Error("cancelled"), { name: "NotAllowedError" })
+    );
+
+    render(<PasskeySetup userId={USER_ID} hasPasskey={false} onStatusChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /set up passkey/i }));
+
+    expect(
+      await screen.findByText(/passkey was created, but vault unlock was not enabled/i)
+    ).toBeTruthy();
+    expect(mocks.wrapVaultKeyForPasskey).not.toHaveBeenCalled();
   });
 
   it("blocks passkey setup when WebAuthn is unavailable", async () => {

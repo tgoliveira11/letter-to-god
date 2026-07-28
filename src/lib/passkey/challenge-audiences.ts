@@ -12,8 +12,8 @@ export function vaultPasskeyEnrollmentChallenge(credentialDbId: string): string 
   return `selahkeep:vault:passkey:enrollment:${credentialDbId}`;
 }
 
-export function vaultEnvelopeEnrollmentProofAudience(credentialDbId: string): string {
-  return `selahkeep:vault:envelope:enrollment:${credentialDbId}`;
+export function vaultEnvelopeAuthenticationProofAudience(credentialDbId: string): string {
+  return `selahkeep:vault:envelope:authentication-confirmed:${credentialDbId}`;
 }
 
 export function vaultBindingProofAudience(credentialDbId: string): string {

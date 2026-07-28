@@ -94,6 +94,7 @@ vi.mock("@/lib/crypto-client/vault-session", async (importOriginal) => ({
 
 vi.mock("@/lib/passkey/prepare-webauthn-options", () => ({
   prepareAuthenticationOptions: (options: unknown) => options,
+  prepareVaultAuthenticationOptions: (options: unknown) => options,
   prepareRegistrationOptions: (options: unknown) => options,
   prepareVaultRegistrationOptions: (options: unknown) => options,
   alignPrfExtensionsForAllowCredentials: (options: unknown) => options,
@@ -128,6 +129,7 @@ function mockVaultUnlockList(
     vaultUnlockEnabled: boolean;
     prfSupported: boolean | null;
     credentialId: string;
+    needsCompatibilityConfirmation?: boolean;
   }> = [],
   options?: { passkeyUnlockAvailableOnThisDevice?: boolean }
 ) {
@@ -179,7 +181,6 @@ describe("PasskeyVaultUnlockSetup", () => {
           verified: true,
           credentialDbId: "pk-new",
           verifiedCredentialId: "cred-new",
-          enrollmentProof: "registration-enrollment-proof",
         };
       }
       // Vault-only setup step 2 + unlock/test: single-credential auth (get) options.
@@ -320,7 +321,26 @@ describe("PasskeyVaultUnlockSetup", () => {
     expect(screen.getByText(/vault unlock: configured/i)).toBeTruthy();
   });
 
-  it("registers vault-only passkey when PRF output is returned", async () => {
+  it("flags legacy variants for authentication compatibility confirmation", async () => {
+    mockVaultUnlockList([
+      {
+        id: "pk-legacy",
+        friendlyName: "Legacy passkey",
+        signInEnabled: false,
+        vaultUnlockEnabled: true,
+        prfSupported: true,
+        credentialId: "cred-legacy",
+        needsCompatibilityConfirmation: true,
+      },
+    ]);
+
+    render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked={false} />);
+
+    expect(await screen.findByText(/compatibility confirmation needed/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /confirm compatibility/i })).toBeEnabled();
+  });
+
+  it("registers a vault-only passkey only after exact authentication confirmation", async () => {
     mocks.probeEnvironment.mockResolvedValue(
       mockEnvironment({ capabilityProbe: "supported", clientCapabilitiesPrf: true })
     );
@@ -338,13 +358,16 @@ describe("PasskeyVaultUnlockSetup", () => {
         "/api/passkeys/register",
         expect.objectContaining({ action: "verify", vaultOnly: true })
       );
-      // Registration-time PRF output avoids a second WebAuthn prompt.
-      expect(mocks.startAuthentication).not.toHaveBeenCalled();
+      expect(mocks.startAuthentication).toHaveBeenCalledTimes(1);
+      expect(mocks.apiPost).toHaveBeenCalledWith(
+        "/api/account/passkeys/pk-new/enable-vault-unlock",
+        expect.objectContaining({ action: "verify" })
+      );
       expect(mocks.apiPost).toHaveBeenCalledWith(
         "/api/account/passkeys/pk-new/enable-vault-unlock",
         expect.objectContaining({
           action: "persist",
-          enrollmentProof: "registration-enrollment-proof",
+          enrollmentProof: "enrollment-proof",
           encryptedVaultKey: expect.anything(),
         })
       );
@@ -528,6 +551,27 @@ describe("PasskeyVaultUnlockSetup", () => {
     expect(await screen.findByText(PASSKEY_VAULT_UNLOCK_TEST_SUCCEEDED_MESSAGE)).toBeTruthy();
   });
 
+  it("guides a no-match test into compatibility confirmation for the same credential", async () => {
+    mockVaultUnlockList([
+      {
+        id: "pk-1",
+        friendlyName: "Synced passkey",
+        signInEnabled: true,
+        vaultUnlockEnabled: true,
+        prfSupported: true,
+        credentialId: "cred-1",
+      },
+    ]);
+    mocks.unlockCandidates.mockResolvedValueOnce({ status: "no_match", attempts: [] });
+
+    render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked={false} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^test$/i }));
+
+    expect(await screen.findByText(/confirm passkey compatibility/i)).toBeTruthy();
+    expect(screen.getByText(/authentication succeeded.*independent vault secret/i)).toBeTruthy();
+    expect(mocks.createIndependentVariant).not.toHaveBeenCalled();
+  });
+
   it("appends a compatibility variant to the same synced credential", async () => {
     mockVaultUnlockList([
       {
@@ -540,12 +584,13 @@ describe("PasskeyVaultUnlockSetup", () => {
       },
     ]);
 
-    render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked />);
+    render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked={false} />);
     fireEvent.click(await screen.findByRole("button", { name: /add compatibility variant/i }));
+    expect(mocks.startAuthentication).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText(/vault password/i), {
       target: { value: "correct horse battery staple" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /confirm and add variant/i }));
+    fireEvent.click(screen.getByRole("button", { name: /continue to passkey/i }));
 
     await waitFor(() => {
       expect(mocks.createIndependentVariant).toHaveBeenCalledWith(
@@ -571,7 +616,7 @@ describe("PasskeyVaultUnlockSetup", () => {
       );
     });
     expect(
-      await screen.findByText(/compatibility envelope variant was added and verified/i)
+      await screen.findByText(/passkey compatibility was confirmed/i)
     ).toBeTruthy();
     expect(
       mocks.apiPost.mock.calls.some(

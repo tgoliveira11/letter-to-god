@@ -1,7 +1,7 @@
 import type { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
-/** HttpOnly device binding id — not a secret; scopes vault unlock to one passkey per browser. */
+/** HttpOnly browser routing hint — not a secret; selects one verified credential and variant. */
 export const VAULT_DEVICE_BINDING_COOKIE = "selahkeep_vault_device";
 
 /** One year — rebinding on setup refreshes Max-Age. */

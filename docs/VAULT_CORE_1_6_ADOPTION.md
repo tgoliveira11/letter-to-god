@@ -1,11 +1,11 @@
-# vault-core 1.6.0 and secure-auth 0.8.0 adoption
+# vault-core 1.6.1 and secure-auth 0.8.0 adoption
 
 This document is the SelahKeep-specific contract. Cryptographic behavior remains owned by the
 published `@tgoliveira/vault-core` documentation.
 
 ## Pinned packages and migration
 
-- `@tgoliveira/vault-core@1.6.0`
+- `@tgoliveira/vault-core@1.6.1`
 - `@tgoliveira/secure-auth@0.8.0`
 - `0021_vault_passkey_multi_device_variants.sql` remains the envelope/binding schema.
 - `0023_secure_auth_passkey_counter_revision.sql` adds `passkey_credentials.counter_revision`
@@ -31,15 +31,24 @@ capabilities.
 ## Registration and reuse
 
 Vault-only setup prepares `create()` options with
-`prepareVaultPasskeyPrfRegistrationOptions()`. When registration returns PRF output,
-`resolvePasskeyPrfEnrollmentAfterRegistration()` produces `status: "ready"` and the app persists
-the first variant from the same user gesture. This is the normal one-prompt path. Only typed
-`authentication_required` falls back to a second `get()` ceremony.
+`prepareVaultPasskeyPrfRegistrationOptions()`. Registration establishes the credential and may
+detect PRF capability, but its PRF output is never authoritative for a durable envelope.
+`resolvePasskeyPrfEnrollmentAfterRegistration()` returns `authentication_required` with exact
+credential selection. The app then runs one user-mediated `get()`, sanitizes the assertion before
+server verification, confirms PRF capability against the verified credential ID, and only then
+wraps, persists, locally matches, and binds the first variant.
 
 In Account settings, **Also use the next passkey for vault unlock** is explicit, defaults off, and
 is available only while the vault is open. secure-auth still owns account registration; its local
-verified hook uses the same registration PRF output and a short-lived HttpOnly app receipt to append
-the ciphertext envelope. If this optional integration fails, the sign-in passkey remains valid.
+verified hook starts an exact authentication ceremony for the same credential. The app-owned route
+mints a single-use persistence proof only after server verification of that assertion. If the user
+cancels or this optional integration fails, the sign-in passkey remains valid and vault unlock can
+be confirmed later from Vault settings.
+
+New variants store `publicMetadata.prfCeremony = "authentication"`. The marker uses the existing
+JSONB column, so vault-core 1.6.1 requires no database migration. Existing variants are preserved,
+remain candidate-readable, and report `needsCompatibilityConfirmation` until the same credential
+has at least one authentication-confirmed variant.
 
 A vault-only credential can be promoted to account sign-in only through secure-auth 0.8.0's
 exact-credential enable-sign-in route. No product route performs account verification or counter
@@ -66,8 +75,12 @@ before TOTP. PRF absence or `no_match` never fails account login.
 `no_match` preserves all variants and leaves the vault locked. Adding a compatibility variant from
 settings requires a local vault password or recovery phrase and calls
 `createPasskeyPrfEnvelopeAfterIndependentAuthorization()`. A session UVK, WebAuthn assertion, or
-browser binding alone is insufficient. Persistence is append-only and the active cap fails closed
-without eviction.
+browser binding alone is insufficient. Test or rebind `no_match` opens this guided confirmation for
+the same logical credential. The independent secret is validated locally first; WebAuthn begins
+only after the user submits and remains an explicit browser-mediated prompt. Persistence is
+append-only, binding occurs only after local candidate match, and the active cap fails closed
+without eviction. The flow is available while the vault is locked because it does not trust a
+session UVK.
 
 ## Legacy AAD
 
@@ -79,7 +92,7 @@ no active password, recovery, or passkey envelope still relies on missing/null c
 
 ## Emergency / duress mode
 
-vault-core 1.6.0 ships Emergency / Duress Mode as opt-in and disabled by default. SelahKeep passes
+vault-core 1.6.x ships Emergency / Duress Mode as opt-in and disabled by default. SelahKeep passes
 `emergencyModeEnabled={false}` to both dock surfaces and exposes no emergency setup, unlock, banner,
 or exit workflow. `VAULT_EMERGENCY_MODE_ENABLED=false` is documented explicitly. Changing the core
 env/admin flag alone is not a supported SelahKeep activation: the app-owned decoy persistence,
@@ -88,11 +101,17 @@ dedicated security review.
 
 ## Acceptance checks
 
-- Registration-time PRF uses one prompt; typed fallback uses two only when required.
+- All three enrollment entry points (recovery setup, vault settings, and account settings opt-in)
+  require registration followed by exact authentication before wrap/persist/bind.
+- Registration PRF may differ from authentication PRF and is never used for wrapping.
+- Cancelling the confirmation or receiving no authentication PRF leaves the credential without a
+  new vault envelope and provides a recoverable Vault settings path.
 - Explicit unlock works without a browser cookie; quick unlock does not.
 - Missing/stale cookies never broaden quick selection.
 - A synced credential can match any of its bounded variants without overwriting prior ciphertext.
 - Compatibility repair rejects an incorrect password/recovery phrase and does not mutate variants.
+- `no_match` guides the same credential into explicit compatibility confirmation; no WebAuthn
+  ceremony starts silently or before user submission.
 - Account registration/login work without vault opt-in or PRF support.
 - Dual-capability account login never sends PRF output and only unlocks after the final session.
 - TOTP accounts never run the vault hook from a partial session.
