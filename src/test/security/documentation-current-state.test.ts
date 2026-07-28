@@ -101,8 +101,6 @@ const FORBIDDEN: ForbiddenRule[] = [
 function findViolations(filePath: string): string[] {
   const rel = relative(ROOT, filePath);
   if (rel === "docs/LTG_VAULT_IMPLEMENTATION_PLAN.md") return [];
-  if (rel === "docs/VAULT_CORE_AGENT_IMPLEMENTATION_PROMPT.md") return [];
-
   const lines = readFileSync(filePath, "utf8").split("\n");
   const violations: string[] = [];
 

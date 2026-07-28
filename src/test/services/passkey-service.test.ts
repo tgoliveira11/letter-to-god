@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   consumeValidChallenge: vi.fn(),
   createCredential: vi.fn(),
   findByCredentialId: vi.fn(),
-  updateCounter: vi.fn(),
+  advanceCounter: vi.fn(),
   updateLastUsedAt: vi.fn(),
   updateCredentialFlags: vi.fn(),
   lockForVaultMutation: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock("@/server/repositories/passkey-repository", () => ({
     consumeValidChallenge: mocks.consumeValidChallenge,
     createCredential: mocks.createCredential,
     findByCredentialId: mocks.findByCredentialId,
-    updateCounter: mocks.updateCounter,
+    advanceCounter: mocks.advanceCounter,
     updateLastUsedAt: mocks.updateLastUsedAt,
     updateCredentialFlags: mocks.updateCredentialFlags,
     lockForVaultMutation: mocks.lockForVaultMutation,
@@ -108,6 +108,7 @@ describe("passkey service", () => {
     mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue([]);
     mocks.bindPasskeyToDevice.mockResolvedValue({ bindingId: "binding-1" });
     mocks.createCredential.mockResolvedValue({ id: "cred-db-id" });
+    mocks.advanceCounter.mockResolvedValue("advanced");
     mocks.createEnvelope.mockResolvedValue({ id: "env-new" });
     mocks.generateRegistrationOptions.mockResolvedValue({ challenge: "reg-challenge" });
     mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: "auth-challenge" });

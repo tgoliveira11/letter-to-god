@@ -66,6 +66,7 @@ vi.mock("@tgoliveira/vault-core/browser", async (importOriginal) => ({
 
 vi.mock("@/lib/passkey/prepare-webauthn-options", () => ({
   prepareRegistrationOptions: (options: unknown) => options,
+  prepareVaultRegistrationOptions: (options: unknown) => options,
   prepareAuthenticationOptions: (options: unknown) => options,
   alignPrfExtensionsForAllowCredentials: (options: unknown) => options,
 }));
@@ -98,6 +99,7 @@ describe("PasskeySetup", () => {
           credentialId: "cred-id",
           verifiedCredentialId: "cred-id",
           credentialDbId: "pk-new",
+          enrollmentProof: "registration-enrollment-proof",
         };
       }
       if (path.endsWith("/enable-vault-unlock") && body?.action === "options") {
@@ -129,7 +131,9 @@ describe("PasskeySetup", () => {
     });
     mocks.startRegistration.mockResolvedValue({
       id: "cred-id",
-      clientExtensionResults: { prf: { enabled: true } },
+      clientExtensionResults: {
+        prf: { enabled: true, results: { first: new ArrayBuffer(32) } },
+      },
     });
     mocks.startAuthentication.mockResolvedValue({
       id: "cred-id",
@@ -165,24 +169,14 @@ describe("PasskeySetup", () => {
         vaultOnly: true,
         friendlyName: expect.any(String),
       });
-      // Step 2: create the envelope from an authentication (get) PRF via enable.
-      expect(mocks.apiPost).toHaveBeenCalledWith(
-        "/api/account/passkeys/pk-new/enable-vault-unlock",
-        { action: "options" }
-      );
-      expect(mocks.apiPost).toHaveBeenCalledWith(
-        "/api/account/passkeys/pk-new/enable-vault-unlock",
-        expect.objectContaining({
-          action: "verify",
-          response: expect.any(Object),
-        })
-      );
+      // Registration-time PRF output avoids a second WebAuthn prompt.
+      expect(mocks.startAuthentication).not.toHaveBeenCalled();
       expect(mocks.apiPost).toHaveBeenCalledWith(
         "/api/account/passkeys/pk-new/enable-vault-unlock",
         expect.objectContaining({
           action: "persist",
           encryptedVaultKey: { version: "enc-v1" },
-          enrollmentProof: "enrollment-proof",
+          enrollmentProof: "registration-enrollment-proof",
         })
       );
       expect(mocks.apiPost).toHaveBeenCalledWith(
@@ -216,6 +210,10 @@ describe("PasskeySetup", () => {
   });
 
   it("does not send vault envelope when the authentication PRF output is missing", async () => {
+    mocks.startRegistration.mockResolvedValue({
+      id: "cred-id",
+      clientExtensionResults: { prf: { enabled: true } },
+    });
     mocks.extractPasskeyPrfOutput.mockReturnValue(null);
 
     render(<PasskeySetup userId={USER_ID} hasPasskey={false} onStatusChange={vi.fn()} />);

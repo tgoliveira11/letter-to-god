@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { LoadingState } from "@/components/ui/loading-state";
 import { clearPrivateApplicationState } from "@/lib/application-state/private-state-cleanup";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
+import { getVaultSessionSnapshot } from "@/lib/crypto-client/vault-session";
 
 /**
  * Persistent layouts must never keep rendering owner A after NextAuth resolves
@@ -26,9 +27,16 @@ export function AppBootstrapBoundary({
 
   useLayoutEffect(() => {
     if (!sessionResolved || snapshotMatchesSession) return;
-    clearPrivateApplicationState();
+    const vaultSession = getVaultSessionSnapshot();
+    const enteringMatchingOwner = Boolean(
+      initialOwnerId === null &&
+        activeOwnerId &&
+        vaultSession.status === "unlocked" &&
+        vaultSession.ownerId === activeOwnerId
+    );
+    if (!enteringMatchingOwner) clearPrivateApplicationState();
     router.refresh();
-  }, [router, sessionResolved, snapshotMatchesSession]);
+  }, [activeOwnerId, initialOwnerId, router, sessionResolved, snapshotMatchesSession]);
 
   if (!snapshotMatchesSession) {
     return <LoadingState label="Refreshing your private space" />;

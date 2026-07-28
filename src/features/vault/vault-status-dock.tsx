@@ -85,6 +85,7 @@ export function VaultStatusDock() {
   return (
     <CoreVaultStatusDock
       visible
+      emergencyModeEnabled={false}
       serverStatus={snapshot}
       prfSupported={capabilities.passkeyPrf.status === "supported"}
       pathname={pathname}

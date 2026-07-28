@@ -12,7 +12,7 @@ Web-first responsive MVP for private encrypted notes in a personal vault.
 
 - Next.js + TypeScript + React
 - PostgreSQL + Drizzle ORM
-- **Account authentication:** [`@tgoliveira/secure-auth@0.7.0`](https://www.npmjs.com/package/@tgoliveira/secure-auth) (experimental — security review before production)
+- **Account authentication:** [`@tgoliveira/secure-auth@0.8.0`](https://www.npmjs.com/package/@tgoliveira/secure-auth) (experimental — security review before production)
 - Web Crypto API (AES-GCM) + Argon2id recovery KDF
 - WebAuthn passkeys (@simplewebauthn) — vault unlock via PRF is app-specific; account sign-in passkeys are provided by secure-auth
 
@@ -24,7 +24,7 @@ curl http://localhost:3001/api/auth/package-health
 
 Migration history: [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
-**Admin platform and secure-auth 0.7.0:** set `AUTH_ADMIN_ENABLED=true` and `ADMIN_BOOTSTRAP_EMAIL` in `.env.local`, then run `npm run db:migrate`. In **production**, set `AUTH_RATE_LIMIT_STORE=postgres` and `RATE_LIMIT_STORE=postgres`; on Vercel, set `AUTH_TRUST_FORWARDED_HEADERS=true`. Open `/admin` when signed in as an admin user.
+**Admin platform and secure-auth 0.8.0:** set `AUTH_ADMIN_ENABLED=true` and `ADMIN_BOOTSTRAP_EMAIL` in `.env.local`, then run `npm run db:migrate`. In **production**, set `AUTH_RATE_LIMIT_STORE=postgres` and `RATE_LIMIT_STORE=postgres`; on Vercel, set `AUTH_TRUST_FORWARDED_HEADERS=true`. Open `/admin` when signed in as an admin user.
 
 Documentation index: [`docs/README.md`](./docs/README.md).
 
@@ -61,7 +61,7 @@ npm run db:migrate    # required after pulling schema updates
 npm run dev
 ```
 
-Migration `0022_secure_auth_user_preferences.sql` is required for secure-auth 0.7.0 account preferences and the server-seeded vault auto-lock setting. It stores account configuration only—never vault keys or note plaintext.
+Migrations `0022_secure_auth_user_preferences.sql` and `0023_secure_auth_passkey_counter_revision.sql` are required for secure-auth 0.8.0. The latter adds compare-and-set revisioning for the shared WebAuthn signature counter; it stores no key or note plaintext.
 
 Open [http://localhost:3001](http://localhost:3001).
 
@@ -90,15 +90,15 @@ Production hides `/api-docs` unless `ENABLE_API_DOCS=true` in `.env.local`.
 
 ## Passkeys (sign-in and vault unlock)
 
-- **Sign in with passkey** on `/login` — phishing-resistant account authentication; does not require TOTP even when 2FA is enabled
-- **Account settings → Passkeys** — register sign-in passkeys (package)
-- **`/vault/settings` → Passkey vault unlock** — enable, test, add a synced-credential compatibility variant, bind/unbind this browser, or disable vault unlock (requires WebAuthn PRF; new variants require an unlocked vault)
+- **Sign in with passkey** on `/login` — phishing-resistant account authentication; an account with TOTP enabled still completes TOTP before receiving a full session
+- **Account settings → Passkeys** — register sign-in passkeys through secure-auth; while the vault is open, an explicit opt-in can use the same creation ceremony for vault unlock
+- **`/vault/settings` → Passkey vault unlock** — enable, test, add a synced-credential compatibility variant, bind/unbind this browser, or disable vault unlock (requires WebAuthn PRF; compatibility repair also requires a local vault password or recovery phrase)
 - **`/vault/security`** — vault security review: health summary, protection status, recovery phrase drill (local-only), passkey compatibility, and recent safe vault security events (entry from Vault settings)
 - **`/vault/recovery`** — recovery phrase management; optional link to vault settings for passkey vault unlock
-- **Passkey sign-in** authenticates the account only. Opening the vault is always a separate explicit action from `/vault/unlock` or the vault dock.
+- **Passkey sign-in** authenticates the account through secure-auth. A passkey already enabled for both capabilities may also open the vault locally after the final account session exists; account login still succeeds if vault PRF/candidate unwrap is unavailable.
 - Details: [`docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md`](docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md)
 
-Run `npm run db:migrate` after pulling schema updates. Vault-core 1.3 adoption requires `0021_vault_passkey_multi_device_variants.sql`; secure-auth 0.7.0 preferences require `0022_secure_auth_user_preferences.sql`. Current vault session ownership uses vault-core 1.5.1 and requires no additional vault database migration; see [`docs/VAULT_CORE_1_3_ADOPTION.md`](docs/VAULT_CORE_1_3_ADOPTION.md).
+Run `npm run db:migrate` after pulling schema updates. Vault-core 1.6.0 uses the existing `0021_vault_passkey_multi_device_variants.sql` schema; secure-auth 0.8.0 additionally requires `0022_secure_auth_user_preferences.sql` and `0023_secure_auth_passkey_counter_revision.sql`. See [`docs/VAULT_CORE_1_6_ADOPTION.md`](docs/VAULT_CORE_1_6_ADOPTION.md).
 
 ## Two-factor authentication (optional)
 
@@ -148,7 +148,7 @@ Microsoft sign-in uses the NextAuth **Azure AD** provider (`azure-ad`) against M
 
 **Account linking:** no automatic linking across providers. If an email is already registered with email/password (or another OAuth provider), Microsoft sign-in is rejected with a safe error.
 
-**OAuth + TOTP:** when account 2FA is enabled, OAuth sign-in (Google, Apple, GitHub, Microsoft) receives a partial session until `/login/2fa` + `POST /api/auth/login/verify-2fa-oauth` completes. The app-owned OAuth challenge waits for session refresh before redirect (see [`docs/TWO_FACTOR_MOBILE_FLOW_AUDIT.md`](docs/TWO_FACTOR_MOBILE_FLOW_AUDIT.md)). Passkey sign-in bypasses TOTP.
+**OAuth/passkey + TOTP:** when account 2FA is enabled, OAuth and passkey sign-in require the package TOTP completion flow before a full session is created. Automatic vault unlock is never attempted from the partial session. See [`docs/TWO_FACTOR_MOBILE_FLOW_AUDIT.md`](docs/TWO_FACTOR_MOBILE_FLOW_AUDIT.md).
 
 ## Email verification and account passwords
 

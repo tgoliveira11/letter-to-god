@@ -20,8 +20,7 @@ describe("useVaultPasskeyUnlockPrefetch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiGet.mockResolvedValue({
-      passkeys: [{ credentialId: "cred-1", vaultUnlockEnabled: true }],
-      activeEnvelopeCredentialId: "cred-1",
+      currentDeviceCredentialId: "cred-1",
     });
     requestOptions.mockResolvedValue({
       challenge: "abc",
@@ -34,7 +33,7 @@ describe("useVaultPasskeyUnlockPrefetch", () => {
     await waitFor(() => {
       expect(result.current.options?.challenge).toBe("abc");
     });
-    expect(requestOptions).toHaveBeenCalledWith("cred-1");
+    expect(requestOptions).toHaveBeenCalledWith("cred-1", "quick");
     expect(result.current.credentialId).toBe("cred-1");
   });
 
@@ -53,5 +52,21 @@ describe("useVaultPasskeyUnlockPrefetch", () => {
     await waitFor(() => {
       expect(result.current.options?.challenge).toBe("next");
     });
+  });
+
+  it("explicit unlock does not require a browser binding hint", async () => {
+    const { result } = renderHook(() => useVaultPasskeyUnlockPrefetch(true, "explicit"));
+    await waitFor(() => expect(result.current.options?.challenge).toBe("abc"));
+    expect(apiGet).not.toHaveBeenCalled();
+    expect(requestOptions).toHaveBeenCalledWith(undefined, "explicit");
+    expect(result.current.credentialId).toBeUndefined();
+  });
+
+  it("quick unlock stays unavailable without an exact browser binding", async () => {
+    apiGet.mockResolvedValue({ currentDeviceCredentialId: null });
+    const { result } = renderHook(() => useVaultPasskeyUnlockPrefetch(true));
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    expect(requestOptions).not.toHaveBeenCalled();
+    expect(result.current.options).toBeNull();
   });
 });

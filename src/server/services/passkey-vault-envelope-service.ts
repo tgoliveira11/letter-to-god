@@ -21,6 +21,12 @@ import { assertVaultKeyAad } from "@/server/policies/aad-validation";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
 import { ChallengeError, NotFoundError } from "@/server/services/passkey-service";
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
+import {
+  vaultBindingProofAudience,
+  vaultEnvelopeEnrollmentProofAudience,
+  vaultPasskeyEnrollmentChallenge,
+} from "@/lib/passkey/challenge-audiences";
+import { resolvePasskeyCounterAdvance } from "@/lib/passkey/passkey-counter";
 
 const rpID = getWebAuthnRpId();
 const origins = getWebAuthnOrigins();
@@ -55,7 +61,7 @@ async function verifyPasskeyAuthentication(
   try {
     challengeRecord = await passkeyRepository.consumeValidChallenge(
       clientData.challenge,
-      "authentication",
+      vaultPasskeyEnrollmentChallenge(credential.id),
       userId
     );
   } catch {
@@ -88,10 +94,22 @@ async function verifyPasskeyAuthentication(
     throw new ChallengeError("Passkey verification failed. Try again.");
   }
 
-  await passkeyRepository.updateCounter(
-    credential.credentialId,
-    String(verification.authenticationInfo.newCounter)
+  const counterPlan = resolvePasskeyCounterAdvance(
+    credential.counter,
+    verification.authenticationInfo.newCounter
   );
+  if (counterPlan.status === "invalid") {
+    throw new ChallengeError("Passkey verification failed. Try again.");
+  }
+  const counterAdvance = await passkeyRepository.advanceCounter(
+    credential.credentialId,
+    counterPlan.expectedCounter,
+    counterPlan.nextCounter,
+    credential.counterRevision
+  );
+  if (counterAdvance === "conflict") {
+    throw new ChallengeError("Passkey verification failed. Try again.");
+  }
   await passkeyRepository.updateLastUsedAt(credential.credentialId);
   await passkeyRepository.updateCredentialFlags(credential.id, userId, {
     credentialDeviceType: verification.authenticationInfo.credentialDeviceType,
@@ -126,7 +144,7 @@ async function getVaultUnlockAuthOptions(
   await passkeyRepository.storeChallenge({
     userId,
     challenge: options.challenge,
-    type: "authentication",
+    type: vaultPasskeyEnrollmentChallenge(credential.id),
     expiresAt: new Date(Date.now() + 5 * 60 * 1000),
   });
   return options;
@@ -134,8 +152,65 @@ async function getVaultUnlockAuthOptions(
 
 /** Product-only passkey envelope persistence; WebAuthn verification stays app-owned. */
 export const passkeyVaultEnvelopeService = {
+  async issueRegistrationEnrollmentProof(
+    userId: string,
+    verifiedCredentialId: string
+  ) {
+    const credential = await passkeyRepository.findByCredentialId(verifiedCredentialId);
+    if (!credential || credential.userId !== userId || credential.vaultUnlockEnabled) {
+      throw new NotFoundError("Passkey is not eligible for vault enrollment");
+    }
+    const enrollmentProof = await issueProof(
+      userId,
+      vaultEnvelopeEnrollmentProofAudience(credential.id)
+    );
+    return {
+      credentialDbId: credential.id,
+      verifiedCredentialId: credential.credentialId,
+      enrollmentProof,
+    };
+  },
+
   async getVaultUnlockAuthOptions(userId: string, credentialDbId: string, ip?: string) {
     return getVaultUnlockAuthOptions(userId, credentialDbId, ip);
+  },
+
+  async getCandidatesAfterAccountPasskeyLogin(
+    userId: string,
+    verifiedCredentialId: string,
+    selectedEnvelopeVariantId?: string | null
+  ) {
+    const credential = await passkeyRepository.findByCredentialId(verifiedCredentialId);
+    if (!credential || credential.userId !== userId || !credential.vaultUnlockEnabled) {
+      throw new NotFoundError("This sign-in passkey is not enabled for vault unlock");
+    }
+    const variants = await vaultRepository.findActivePasskeyEnvelopeVariants(
+      userId,
+      credential.id,
+      credential.credentialId,
+      selectedEnvelopeVariantId
+    );
+    if (variants.length === 0 || variants.length > MAX_ACTIVE_PASSKEY_ENVELOPE_VARIANTS) {
+      throw new ChallengeError("No bounded vault envelope candidate set is available");
+    }
+    const bindingProof = await issueProof(userId, vaultBindingProofAudience(credential.id));
+    return {
+      userId,
+      verifiedCredentialId: credential.credentialId,
+      bindingProof,
+      candidates: variants.map((variant) => ({
+        envelopeVariantId: variant.id,
+        credentialId: credential.credentialId,
+        envelope: {
+          method: "passkey_prf" as const,
+          encryptedVaultKey: variant.encryptedVaultKey,
+          kdfMetadata: null,
+          ...(variant.publicMetadata
+            ? { publicMetadata: variant.publicMetadata as Record<string, unknown> }
+            : {}),
+        },
+      })),
+    };
   },
 
   async verifyVaultUnlockEnrollment(
@@ -144,7 +219,10 @@ export const passkeyVaultEnvelopeService = {
     response: AuthenticationResponseJSON
   ) {
     const { credential } = await verifyPasskeyAuthentication(userId, credentialDbId, response);
-    const enrollmentProof = await issueProof(userId, `vault-envelope:${credential.id}`);
+    const enrollmentProof = await issueProof(
+      userId,
+      vaultEnvelopeEnrollmentProofAudience(credential.id)
+    );
     return {
       verified: true,
       verifiedCredentialId: credential.credentialId,
@@ -166,7 +244,7 @@ export const passkeyVaultEnvelopeService = {
     try {
       await passkeyRepository.consumeValidChallenge(
         enrollmentProof,
-        `vault-envelope:${credential.id}`,
+        vaultEnvelopeEnrollmentProofAudience(credential.id),
         userId
       );
     } catch {
@@ -215,7 +293,7 @@ export const passkeyVaultEnvelopeService = {
       );
     });
 
-    const bindingProof = await issueProof(userId, `vault-binding:${credential.id}`);
+    const bindingProof = await issueProof(userId, vaultBindingProofAudience(credential.id));
     return {
       success: true,
       verifiedCredentialId: credential.credentialId,
@@ -271,7 +349,7 @@ export const passkeyVaultEnvelopeService = {
     try {
       await passkeyRepository.consumeValidChallenge(
         input.bindingProof,
-        `vault-binding:${credential.id}`,
+        vaultBindingProofAudience(credential.id),
         userId
       );
     } catch {

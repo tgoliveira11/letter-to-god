@@ -58,7 +58,7 @@ src/
   lib/
     crypto-client/     # Note + version encryption + legacy shims re-exporting src/modules/vault
     voice/             # Pure voice helpers: languages, audio PCM, transcript format, config
-    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.5.1)
+    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.6.0)
     api-client/        # HTTP client for API
     validation/        # Shared Zod schemas
     db/                # Drizzle client (server-only)
@@ -74,7 +74,7 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 
 **`/api-docs` layout:** Swagger UI intentionally renders **without** `SiteShell` (`Nav` / `SiteFooter`) so the vendor UI can use the full viewport. The page still includes the global skip link from the root layout and sets `id="main-content"` on its `<main>`. In production the route returns 404 unless `ENABLE_API_DOCS=true` (see `.env.example` and `docs/API_REFERENCE.md`).
 
-- Passkey registration never persists a vault envelope. A later authentication ceremony verifies the credential, confirms PRF locally, and appends one encrypted variant; existing variants are never replaced implicitly.
+- Vault-only registration uses registration-time PRF when available, so setup normally needs one WebAuthn prompt. A typed authentication fallback is used only when the authenticator confirms PRF but does not return registration output. Existing variants are never replaced implicitly.
 - **Account passkeys and vault passkeys are independent** — vault-only setup uses `POST /api/passkeys/register` with `vaultOnly: true` (`signInEnabled: false`, `authenticatorAttachment: "platform"`); account passkey sign-in never unlocks the vault
 - Vault unlock authenticate: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` — missing binding uses the explicit active allow-list; a stale binding fails closed. Stored transports are preserved. Verification returns at most five encrypted variants for the verified credential; only a local candidate match may persist `selectedEnvelopeVariantId`.
 - `vault_envelopes.passkey_credential_id` identifies the logical credential; `vault_passkey_device_bindings` is many-to-one and its composite FK ensures the selected variant belongs to that credential. Migration `0021` preserves legacy ciphertext/AAD/IDs byte-for-byte.
@@ -96,7 +96,7 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 - `PUT /api/vault/password-envelope` — persist a client-generated Argon2id KDF upgrade by atomically replacing ciphertext only; no password/UVK crosses the API
 - `POST /api/recovery-code`, `POST /api/vault/unlock-with-recovery-code` — legacy recovery code only
 - `POST /api/passkeys/register`, `POST /api/passkeys/authenticate`, `DELETE /api/passkeys` — vault recovery passkey flows (authenticated)
-- `POST /api/auth/passkey/login/options`, `POST /api/auth/passkey/login/verify` — passkey account sign-in (unauthenticated; bypasses TOTP)
+- `POST /api/auth/passkey/login/options`, `POST /api/auth/passkey/login/verify` — passkey account sign-in (unauthenticated start; TOTP still required when enabled)
 - `GET /api/account/passkeys`, `POST /api/account/passkeys/register`, `DELETE /api/account/passkeys/:id`, `POST /api/account/passkeys/:id/enable-vault-unlock`
 - `DELETE /api/account` — account deletion
 - `GET /api/account/2fa/status`, `POST /api/account/2fa/setup/start`, `POST /api/account/2fa/setup/verify`, `POST /api/account/2fa/disable`, `POST /api/account/2fa/backup-codes/regenerate`
@@ -194,7 +194,7 @@ Failures roll back all related writes.
 
 Account passkey sign-in is owned by `@tgoliveira/secure-auth` (`LoginPage` and package client) and establishes only the account session.
 
-Account passkey options and verification are pure package delegates. Passkey vault unlock is a separate signed-in action from `/vault/unlock` or the vault dock using `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"`; no package client alias, login PRF enrichment, or login-token vault metadata routes are used. Per-passkey enable/status/revoke remain product-owned: `enable-vault-unlock`, `GET/DELETE .../vault-unlock`.
+Account passkey verification and counter CAS remain package-owned. SelahKeep may add only the public vault PRF salt to options for an already dual-capability credential. After secure-auth creates a final session, a browser-only hook may unwrap encrypted candidates locally; it never sends PRF output and never makes account login depend on vault unlock. Explicit vault unlock remains available through `/api/passkeys/authenticate`.
 
 See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md) and [`docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md`](./docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md).
 

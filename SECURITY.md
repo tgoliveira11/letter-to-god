@@ -194,11 +194,11 @@ Plaintext passwords are redacted from logs (`safeLogger`) and blocked from audit
 
 These flows protect **account authentication only**. They do **not** unlock, recover, rotate, or decrypt the private letters vault. User-facing copy states this on reset and change-password screens.
 
-**Account authentication** is implemented by `@tgoliveira/secure-auth@0.7.0` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
+**Account authentication** is implemented by `@tgoliveira/secure-auth@0.8.0` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
 **Admin platform (0.4.1+)** — when `AUTH_ADMIN_ENABLED=true`, `/admin` and `/api/auth/admin/*` are served by the package. Unauthenticated users are redirected to login by `src/proxy.ts`; **role checks (`admin` vs `user`) are enforced in package API handlers**, not in the proxy. Bootstrap: set `ADMIN_BOOTSTRAP_EMAIL` to promote the first admin when none exists. This admin surface manages **accounts only** — it does not access vault keys or decrypted note content. App-specific `/api/admin/users/[id]` remains separate (self-summary only).
 
-**secure-auth 0.7.0 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
+**secure-auth 0.8.0 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
 
 **Package API security (0.1.21+)** — enforced inside `@tgoliveira/secure-auth` route handlers, not only in app middleware:
 
@@ -282,12 +282,11 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 ## Passkey account sign-in
 
 - Passkeys can authenticate the account via discoverable WebAuthn (`challenge` type `login`, consumed atomically)
-- Passkey sign-in does **not** require a separate TOTP code when account 2FA is enabled
-- Email/password sign-in still requires TOTP when 2FA is enabled
+- Passkey and email/password sign-in both complete TOTP when account 2FA is enabled
 - OAuth + TOTP behavior is unchanged (partial session until `/login/2fa`)
-- Successful passkey login issues the same one-time `login-token` session as post-TOTP credentials login (`twoFactorVerified: true`)
-- Account passkey login never unlocks the vault and never requests vault PRF output
-- After authentication, passkey vault unlock is a separate explicit client-side PRF ceremony (`src/features/passkey/unlock-with-passkey.ts`) using `purpose: "vault_unlock"` on `POST /api/passkeys/authenticate`
+- Successful passkey login issues the same one-time `login-token` session as post-TOTP credentials login
+- A dual-capability credential may receive the public PRF salt during account login. secure-auth sanitizes the assertion before verification; PRF output remains browser-only.
+- Only after a final fully authenticated session exists may the optional login hook load encrypted candidates, unwrap locally, and install the vault session. The hook is not invoked before TOTP and account login remains successful if vault unlock is unavailable.
 - If the passkey has no vault envelope or PRF is unavailable, the account remains signed in and the vault remains locked
 - Account passkey management: `GET /api/account/passkeys`, register/remove (package), optional vault unlock enable (`enable-vault-unlock`), status/revoke (`GET/DELETE .../vault-unlock`)
 
@@ -303,8 +302,8 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 - `sanitizeWebAuthnResponseForServer()` removes extension output before every request. Recursive server guards reject `clientExtensionResults.prf`, raw PRF output, and PRF hashes. PRF bytes never leave the browser.
 - The server returns `verifiedCredentialId`, an opaque short-lived binding proof, and at most five encrypted candidates for the verified credential. The browser confirms PRF capability against that ID, extracts PRF by credential ID, and runs vault-core candidate unwrap.
 - `selectedEnvelopeVariantId` and binding `lastUsedAt` are persisted only after `status: "matched"`. `no_match`, test, and failed rebind do not mutate routing state; WebAuthn counter and authenticator backup metadata updates are expected verification-side exceptions.
-- One synced credential may have several active envelope variants and browser bindings. The active variant cap is five and fails closed without eviction. With the vault unlocked, settings can append a compatibility variant to the same credential.
-- New writes require `SELAHKEEP_VAULT_PROFILE.aadContextEnvelope`. Legacy ciphertext with missing/null AAD context is read through vault-core 1.3 while `legacyVaultKeyUnlock` remains enabled; arbitrary explicit contexts fail closed because no legacy string allowlist is configured.
+- One synced credential may have several active envelope variants and browser bindings. The active variant cap is five and fails closed without eviction. Compatibility repair requires local password/recovery authorization through vault-core 1.6.0 and never trusts the session UVK or a browser binding alone.
+- New writes require `SELAHKEEP_VAULT_PROFILE.aadContextEnvelope`. Legacy ciphertext with missing/null AAD context remains readable while `legacyVaultKeyUnlock` is enabled; arbitrary explicit contexts fail closed because no legacy string allowlist is configured. Disable this fallback only after telemetry/data migration confirms no legacy envelopes remain.
 - If PRF is unavailable, a passkey vault envelope is **not** created and existing variants are **not** revoked
 - PRF diagnostics: `src/lib/passkey/passkey-prf-diagnostics.ts`; audits `docs/archive/PASSKEY_VAULT_UNLOCK_DIAGNOSTIC_AUDIT.md`, `docs/archive/PASSKEY_VAULT_SETUP_AVAILABILITY_AUDIT.md`
 - Availability state: `src/lib/passkey/vault-passkey-availability.ts` — missing account passkey is never reported as browser unsupported; configured envelopes stay read-only in PRF-incompatible browsers

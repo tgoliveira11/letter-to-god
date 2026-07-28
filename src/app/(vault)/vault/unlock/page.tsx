@@ -13,7 +13,6 @@ import { PageHeader } from "@/components/ui/page-header";
 import { useVault } from "@/features/vault/use-vault";
 import { useVaultClientStatus } from "@/features/vault/use-vault-client-status";
 import { useVaultPasskeyUnlockPrefetch } from "@/features/passkey/use-vault-passkey-unlock-prefetch";
-import { useVaultDockPasskeyAvailable } from "@/features/vault/vault-dock-passkey-availability";
 import { VaultStatusPrompt } from "@/features/vault/vault-status-prompt";
 import { readSelahkeepVaultUnlockReturnPath } from "@/lib/notes/safe-return-to";
 import { getVaultUnlockRateLimiter } from "@/lib/vault/vault-rate-limit";
@@ -22,6 +21,7 @@ import { PRODUCT_NAME } from "@/lib/marketing/brand";
 import { LegacyVaultUnlockPanel } from "@/features/vault/legacy-vault-unlock-panel";
 import { useBrowserCapabilities } from "@/components/browser-capabilities-provider";
 import { useApplicationState } from "@/components/application-state-provider";
+import { resolvePasskeyUnlockPlan } from "@tgoliveira/vault-core";
 
 export default function VaultUnlockPage() {
   const application = useApplicationState();
@@ -39,9 +39,18 @@ export default function VaultUnlockPage() {
     unlockFromRecoveryPhrase,
   } = useVault();
   const serverStatusForPasskey = vaultClient.status === "ready" ? vaultClient.serverStatus : null;
-  const passkeyAvailability = useVaultDockPasskeyAvailable(serverStatusForPasskey);
+  const hasPasskeyPrfEnvelope = Boolean(
+    serverStatusForPasskey?.availableUnlockMethods?.passkey ?? serverStatusForPasskey?.hasPasskey
+  );
+  const explicitPasskeyPlan = resolvePasskeyUnlockPlan({
+    intent: "explicit",
+    hasPasskeyPrfEnvelope,
+    preliminaryPrfAvailable: capabilities.passkeyPrf.status === "supported",
+  });
+  const explicitPasskeyReady = explicitPasskeyPlan.status === "ready";
   const { prefetch, refresh } = useVaultPasskeyUnlockPrefetch(
-    Boolean(application.ownerId) && passkeyAvailability.showPasskey
+    Boolean(application.ownerId) && explicitPasskeyReady,
+    "explicit"
   );
   const rateLimitScopeKey = application.ownerId ?? "vault";
 
@@ -105,7 +114,7 @@ export default function VaultUnlockPage() {
           error={error}
           serverStatus={snapshot}
           prfSupported={capabilities.passkeyPrf.status === "supported"}
-          passkeyReady={passkeyAvailability.showPasskey}
+          passkeyReady={explicitPasskeyReady}
           unlockRateLimiter={rateLimiter}
           rateLimitScopeKey={rateLimitScopeKey}
           onUnlockPassword={async (password) => {
@@ -117,7 +126,7 @@ export default function VaultUnlockPage() {
             router.push(afterUnlockPath);
           }}
           onUnlockPasskey={
-            passkeyAvailability.showPasskey
+            explicitPasskeyReady
               ? async () => {
                   const latest = (await refresh()) ?? prefetch;
                   await unlockFromPasskey(latest?.options, latest?.credentialId);

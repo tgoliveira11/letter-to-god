@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AccountSettingsPage, SecuritySettingsPage } from "@tgoliveira/secure-auth/react";
+import { AccountSettingsPage } from "@tgoliveira/secure-auth/react";
 import { defaultSignOutAccount, signOutWithRedirect } from "@tgoliveira/secure-auth/react/client";
 import { Button } from "@/components/ui/button";
 import { AuthenticatedPage } from "@/components/layout/authenticated-page";
@@ -12,6 +12,7 @@ import { clearVaultClientState } from "@/lib/crypto-client/vault";
 import { ACCOUNT_DELETION_VAULT_NOTE } from "@/lib/account-auth-messages";
 import { Alert } from "@/components/ui/alert";
 import { useApplicationState } from "@/components/application-state-provider";
+import { AccountPasskeySecuritySettings } from "@/features/passkey/account-passkey-security-settings";
 
 export default function AccountSettingsPageWrapper() {
   const { ownerId } = useApplicationState();
@@ -55,7 +56,7 @@ export default function AccountSettingsPageWrapper() {
           title="Security"
           description="Password, two-factor authentication, and account passkeys for sign-in."
         >
-          <SecuritySettingsPage appSlug={APP_PASSKEY_SLUG} />
+          {ownerId ? <AccountPasskeySecuritySettings userId={ownerId} /> : null}
         </SettingsSection>
 
         <SettingsSection>

@@ -72,7 +72,8 @@ Credentials login (`?mode=credentials` → native POST → `/login/complete`) wa
 | `?mode=credentials` | Password / passkey login requiring TOTP | Native POST → `/login/complete` → `login-token` provider |
 | OAuth (default) | Google / Apple / Microsoft with TOTP enabled | App `OAuthTwoFactorChallenge` → `verify-2fa-oauth` → session upgrade → safe redirect |
 
-Passkey sign-in bypasses TOTP when account 2FA is enabled (package design).
+Passkey sign-in completes the package TOTP flow when account 2FA is enabled. The optional vault
+hook runs only after secure-auth creates the final session, never from the partial challenge.
 
 ---
 

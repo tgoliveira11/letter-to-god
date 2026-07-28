@@ -35,6 +35,12 @@ import {
   getWebAuthnRpName,
   toPasskeyVerificationErrorMessage,
 } from "@/lib/passkey/webauthn-config";
+import {
+  VAULT_PASSKEY_REGISTRATION_CHALLENGE,
+  VAULT_PASSKEY_UNLOCK_CHALLENGE,
+  vaultBindingProofAudience,
+} from "@/lib/passkey/challenge-audiences";
+import { resolvePasskeyCounterAdvance } from "@/lib/passkey/passkey-counter";
 
 const rpName = getWebAuthnRpName();
 const rpID = getWebAuthnRpId();
@@ -138,7 +144,7 @@ async function buildVaultUnlockAuthenticationOptions(
   await passkeyRepository.storeChallenge({
     userId,
     challenge: options.challenge,
-    type: "authentication",
+    type: VAULT_PASSKEY_UNLOCK_CHALLENGE,
     expiresAt: new Date(Date.now() + 5 * 60 * 1000),
   });
 
@@ -190,7 +196,9 @@ export const passkeyService = {
     await passkeyRepository.storeChallenge({
       userId,
       challenge: options.challenge,
-      type: "registration",
+      type: vaultOnly
+        ? VAULT_PASSKEY_REGISTRATION_CHALLENGE
+        : "selahkeep:passkey:registration",
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
@@ -213,7 +221,9 @@ export const passkeyService = {
     try {
       challengeRecord = await passkeyRepository.consumeValidChallenge(
         clientData.challenge,
-        "registration",
+        options?.vaultOnly
+          ? VAULT_PASSKEY_REGISTRATION_CHALLENGE
+          : "selahkeep:passkey:registration",
         userId
       );
     } catch {
@@ -320,7 +330,9 @@ export const passkeyService = {
     await passkeyRepository.storeChallenge({
       userId,
       challenge: options.challenge,
-      type: "authentication",
+      type: purpose === "vault_unlock"
+        ? VAULT_PASSKEY_UNLOCK_CHALLENGE
+        : "selahkeep:passkey:authentication",
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
@@ -340,7 +352,9 @@ export const passkeyService = {
     try {
       challengeRecord = await passkeyRepository.consumeValidChallenge(
         clientData.challenge,
-        "authentication",
+        authOptions?.purpose === "vault_unlock"
+          ? VAULT_PASSKEY_UNLOCK_CHALLENGE
+          : "selahkeep:passkey:authentication",
         userId
       );
     } catch {
@@ -379,10 +393,22 @@ export const passkeyService = {
       throw new ChallengeError("Passkey authentication failed. Try again or use your recovery code.");
     }
 
-    await passkeyRepository.updateCounter(
-      credential.credentialId,
-      String(verification.authenticationInfo.newCounter)
+    const counterPlan = resolvePasskeyCounterAdvance(
+      credential.counter,
+      verification.authenticationInfo.newCounter
     );
+    if (counterPlan.status === "invalid") {
+      throw new ChallengeError("Passkey authentication failed. Try again.");
+    }
+    const counterAdvance = await passkeyRepository.advanceCounter(
+      credential.credentialId,
+      counterPlan.expectedCounter,
+      counterPlan.nextCounter,
+      credential.counterRevision
+    );
+    if (counterAdvance === "conflict") {
+      throw new ChallengeError("Passkey authentication failed. Try again.");
+    }
 
     await passkeyRepository.updateLastUsedAt(credential.credentialId);
 
@@ -432,7 +458,7 @@ export const passkeyService = {
       await passkeyRepository.storeChallenge({
         userId,
         challenge: bindingProof,
-        type: `vault-binding:${credential.id}`,
+        type: vaultBindingProofAudience(credential.id),
         expiresAt: new Date(Date.now() + 5 * 60 * 1000),
       });
 
@@ -478,7 +504,7 @@ export const passkeyService = {
     try {
       await passkeyRepository.consumeValidChallenge(
         input.bindingProof,
-        `vault-binding:${credential.id}`,
+        vaultBindingProofAudience(credential.id),
         userId
       );
     } catch {

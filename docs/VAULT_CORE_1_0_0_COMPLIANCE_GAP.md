@@ -6,7 +6,8 @@
 
 ### 1.1.0 passkey PRF gap adoption (2026-07-03) — **resolved**
 
-SelahKeep section 7 adoption (`docs/VAULT_CORE_AGENT_IMPLEMENTATION_PROMPT.md`) is complete for passkey PRF duplication:
+The historical section 7 adoption is complete for passkey PRF duplication. Current consumer
+guidance is [`VAULT_CORE_1_6_ADOPTION.md`](./VAULT_CORE_1_6_ADOPTION.md):
 
 | Removed (SelahKeep) | Replaced by (`@tgoliveira/vault-core`) |
 | --- | --- |

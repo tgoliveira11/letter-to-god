@@ -93,6 +93,7 @@ export function VaultDockQuickUnlockSlot({
   return (
     <VaultDockQuickUnlock
       loading={loading}
+      emergencyModeEnabled={false}
       error={error}
       serverStatus={serverStatus}
       passkeyReady={passkeyReady}

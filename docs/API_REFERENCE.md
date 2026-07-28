@@ -65,7 +65,7 @@ Optional account-level 2FA protects **sign-in only** — it does not decrypt pri
 
 Credentials login: `login/start` → optional `verify-2fa` → one-time `login-token` NextAuth provider. OAuth users (Google, Apple, Microsoft) with 2FA enabled receive a partial session until `verify-2fa-oauth` completes.
 
-**Passkey sign-in bypasses TOTP** when account 2FA is enabled (passkey user verification is sufficient for account authentication).
+**Passkey sign-in still completes TOTP** when account 2FA is enabled. No vault hook runs from a partial session.
 
 ### Passkey account sign-in and management
 
@@ -77,6 +77,7 @@ Passkeys authenticate the account separately from vault decryption. A passkey un
 | `POST` | `/api/auth/passkey/login/verify` | Public |
 | `GET` | `/api/account/passkeys` | Session |
 | `POST` | `/api/account/passkeys/register` | Session |
+| `POST` | `/api/account/passkeys/:id/enable-sign-in` | Session; package-owned exact-credential promotion |
 | `DELETE` | `/api/account/passkeys/:id` | Session |
 | `POST` | `/api/account/passkeys/:id/enable-vault-unlock` | Session (actions `options`, `verify`, `persist`; persist requires locally unlocked vault) |
 | `GET` | `/api/account/passkeys/:id/vault-unlock` | Session |
@@ -84,10 +85,12 @@ Passkeys authenticate the account separately from vault decryption. A passkey un
 | `GET` | `/api/passkeys/vault-unlock` | Session |
 | `DELETE` | `/api/passkeys/vault-unlock` | Fully authenticated session; bulk-remove vault passkey capabilities/envelopes/bindings, preserving account sign-in passkeys |
 | `POST` | `/api/passkeys/authenticate` | Session (actions `options`, `verify`, `bind`; `purpose: vault_unlock`) |
+| `POST` | `/api/passkeys/account-registration-vault` | Fully authenticated session + short-lived HttpOnly registration proof; ciphertext only |
+| `POST` | `/api/passkeys/account-login-vault-candidates` | Fully authenticated final session; encrypted candidates only |
 | `DELETE` | `/api/passkeys/authenticate` | Session; unbind current browser only |
 | `DELETE` | `/api/passkeys` | Legacy alias for bulk vault-passkey removal; never removes account sign-in capability |
 
-Passkey vault unlock is separate from sign-in. `verify` returns the verified credential ID, an opaque short-lived proof, and at most five encrypted envelope candidates. PRF output stays in the browser: clients sanitize WebAuthn responses, confirm PRF against the verified ID, unwrap candidates locally, and call `bind` only after `status: matched`. Missing binding cookies use an explicit credential allow-list; stale cookies receive 409, are cleared, and require explicit rebind. Settings may append a compatibility variant to the same synced credential; the server never evicts an active variant implicitly.
+Account authentication and vault unlock remain independent security domains, but the same credential may opt into both. `verify` returns the verified credential ID, an opaque short-lived proof, and at most five encrypted envelope candidates. PRF output stays in the browser: clients sanitize WebAuthn responses, confirm PRF against the verified ID, unwrap candidates locally, and call `bind` only after `status: matched`. Missing binding cookies use an explicit credential allow-list; quick unlock requires an exact browser binding. Compatibility repair requires local password/recovery authorization and the server never evicts an active variant implicitly.
 
 ### Vault recovery phrase
 
