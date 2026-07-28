@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { SecuritySettingsPage } from "@tgoliveira/secure-auth/react";
 import type { AccountPasskeyRegistrationHooks } from "@tgoliveira/secure-auth/react/client";
-import { resolvePasskeyPrfEnrollmentAfterRegistration } from "@tgoliveira/vault-core/browser";
+import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import type { EncryptedPayload as VaultCoreEncryptedPayload } from "@tgoliveira/vault-core";
 import { APP_PASSKEY_SLUG } from "@/lib/passkey/app-slug";
 import { getSessionVaultKey } from "@/lib/crypto-client/vault";
@@ -19,6 +19,9 @@ import { assertVaultSessionOperationCurrent } from "@tgoliveira/vault-core/brows
 import { useVaultSessionUnlocked } from "@/features/vault/use-vault-session-unlocked";
 import type { EncryptedPayload } from "@/lib/validation/encrypted-payload";
 import { prepareVaultRegistrationOptions } from "@/lib/passkey/prepare-webauthn-options";
+import { runAuthenticationConfirmedPasskeyEnrollment } from "@/lib/passkey/authentication-confirmed-enrollment";
+import { isCeremonyCancellation } from "@/lib/passkey/passkey-prf-diagnostics";
+import { PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE } from "@/lib/passkey/messages";
 
 export function AccountPasskeySecuritySettings({ userId }: { userId: string }) {
   const vaultUnlocked = useVaultSessionUnlocked();
@@ -37,18 +40,34 @@ export function AccountPasskeySecuritySettings({ userId }: { userId: string }) {
         const vaultKey = getSessionVaultKey();
         if (!vaultKey) throw new Error("Unlock the vault before sharing this passkey.");
 
-        const enrollment = resolvePasskeyPrfEnrollmentAfterRegistration({
-          registrationCredentialId,
-          verifiedCredentialId,
-          clientExtensionResults: clientExtensionResults as Record<string, unknown>,
-        });
-        if (enrollment.status !== "ready") {
-          throw new Error(
-            "The sign-in passkey was added. Enable vault unlock for it from Vault settings."
-          );
-        }
-
         const operation = beginVaultOwnerOperation(userId);
+        let enrollment;
+        try {
+          enrollment = await runAuthenticationConfirmedPasskeyEnrollment({
+            userId,
+            registrationCredentialId,
+            verifiedRegistrationCredentialId: verifiedCredentialId,
+            registrationClientExtensionResults:
+              clientExtensionResults as Record<string, unknown>,
+            requestAuthenticationOptions: async (credentialId) =>
+              apiClient.post<PublicKeyCredentialRequestOptionsJSON>(
+                "/api/passkeys/account-registration-vault",
+                { action: "options", verifiedCredentialId: credentialId }
+              ),
+            verifyAuthentication: async (credentialId, response) =>
+              apiClient.post("/api/passkeys/account-registration-vault", {
+                action: "verify",
+                verifiedCredentialId: credentialId,
+                response,
+              }),
+          });
+        } catch (error) {
+          if (isCeremonyCancellation(error)) {
+            throw new Error(PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE);
+          }
+          throw error;
+        }
+        assertVaultSessionOperationCurrent(operation);
         try {
           const encryptedVaultKey: EncryptedPayload = await wrapVaultKeyForPasskey(
             vaultKey,
@@ -63,12 +82,14 @@ export function AccountPasskeySecuritySettings({ userId }: { userId: string }) {
             envelopeVariantId: string;
             bindingProof: string;
           }>("/api/passkeys/account-registration-vault", {
-            verifiedCredentialId: enrollment.credentialId,
+            action: "persist",
+            verifiedCredentialId: enrollment.verifiedCredentialId,
+            enrollmentProof: enrollment.enrollmentProof,
             encryptedVaultKey,
             prfSupported: true,
           });
           assertVaultSessionOperationCurrent(operation);
-          if (persisted.verifiedCredentialId !== enrollment.credentialId) {
+          if (persisted.verifiedCredentialId !== enrollment.verifiedCredentialId) {
             throw new Error("Persisted passkey credential mismatch.");
           }
 
@@ -86,6 +107,7 @@ export function AccountPasskeySecuritySettings({ userId }: { userId: string }) {
                   publicMetadata: {
                     credentialId: persisted.verifiedCredentialId,
                     prfRequired: true,
+                    prfCeremony: "authentication",
                   },
                 },
               },
@@ -128,8 +150,9 @@ export function AccountPasskeySecuritySettings({ userId }: { userId: string }) {
             Also use the next passkey for vault unlock
           </span>
           <span className="text-[var(--muted)]">
-            Optional. Uses one passkey creation prompt while keeping account sign-in and vault
-            unlock as independent capabilities. Your vault must already be unlocked.
+            Optional. Creates an account sign-in passkey, then asks you to authenticate with that
+            exact passkey once before vault unlock is enabled. The capabilities remain independent,
+            and your vault must already be unlocked.
           </span>
         </span>
       </label>

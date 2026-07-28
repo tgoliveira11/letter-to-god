@@ -104,7 +104,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | Encrypted local drafts | Shipped | IndexedDB; not server plaintext |
 | Vault auto-lock | Shipped | Client session timer |
 | Deterministic private state | Shipped | Server-seeded account snapshot; owner/lease/resource/generation guards discard stale async results across lock/logout/account replacement |
-| Passkey PRF vault unlock | Shipped | vault-core 1.6.0 explicit/quick selection, one-prompt registration when PRF output is available, synced-credential candidates, independently authorized compatibility repair, and optional secure-auth 0.8.0 sign-in composition |
+| Passkey PRF vault unlock | Shipped | vault-core 1.6.1 authentication-confirmed enrollment, explicit/quick selection, synced-credential candidates, independently authorized guided compatibility repair, and optional secure-auth 0.8.0 sign-in composition |
 | Note Kanban generation | Shipped | Deterministic on-device parsing of decrypted note markdown; no LLM/plaintext egress |
 | Note ↔ Kanban bidirectional sync | Shipped | Note-bound boards sync checklist/list structure and card state client-side (debounced); encryption unchanged |
 | MCP AI integrations | Shipped (when `INTEGRATIONS_ENABLED`) | Local MCP server + optional bridge; scoped read/write on shared notes/boards only |

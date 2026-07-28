@@ -117,7 +117,7 @@ The migration is additive. Application rollback may safely leave `user_preferenc
 The deterministic state contract is pinned to:
 
 - `@tgoliveira/secure-auth@0.8.0`
-- `@tgoliveira/vault-core@1.6.0`
+- `@tgoliveira/vault-core@1.6.1`
 - `@tgoliveira/outpost@1.2.2`
 - `next@16.2.11`
 - `next-auth@4.24.15`

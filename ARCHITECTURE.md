@@ -58,7 +58,7 @@ src/
   lib/
     crypto-client/     # Note + version encryption + legacy shims re-exporting src/modules/vault
     voice/             # Pure voice helpers: languages, audio PCM, transcript format, config
-    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.6.0)
+    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.6.1)
     api-client/        # HTTP client for API
     validation/        # Shared Zod schemas
     db/                # Drizzle client (server-only)
@@ -74,7 +74,7 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 
 **`/api-docs` layout:** Swagger UI intentionally renders **without** `SiteShell` (`Nav` / `SiteFooter`) so the vendor UI can use the full viewport. The page still includes the global skip link from the root layout and sets `id="main-content"` on its `<main>`. In production the route returns 404 unless `ENABLE_API_DOCS=true` (see `.env.example` and `docs/API_REFERENCE.md`).
 
-- Vault-only registration uses registration-time PRF when available, so setup normally needs one WebAuthn prompt. A typed authentication fallback is used only when the authenticator confirms PRF but does not return registration output. Existing variants are never replaced implicitly.
+- Passkey registration is capability detection only. Every vault enrollment requires an exact post-registration `get()` confirmation; only its PRF output may wrap a durable envelope. Existing variants are never replaced implicitly.
 - **Account passkeys and vault passkeys are independent** — vault-only setup uses `POST /api/passkeys/register` with `vaultOnly: true` (`signInEnabled: false`, `authenticatorAttachment: "platform"`); account passkey sign-in never unlocks the vault
 - Vault unlock authenticate: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` — missing binding uses the explicit active allow-list; a stale binding fails closed. Stored transports are preserved. Verification returns at most five encrypted variants for the verified credential; only a local candidate match may persist `selectedEnvelopeVariantId`.
 - `vault_envelopes.passkey_credential_id` identifies the logical credential; `vault_passkey_device_bindings` is many-to-one and its composite FK ensures the selected variant belongs to that credential. Migration `0021` preserves legacy ciphertext/AAD/IDs byte-for-byte.

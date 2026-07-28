@@ -437,10 +437,10 @@ describe("passkey service", () => {
     expect(mocks.generateAuthenticationOptions).not.toHaveBeenCalled();
   });
 
-  it("vault unlock offers every per-device passkey when no device binding", async () => {
-    // Multi-device: one envelope per device. Unlock offers ALL of them so the user can
-    // authenticate with the passkey local to the current device. A single `eval` salt is
-    // used (the authenticator evaluates it for whichever credential the user picks).
+  it("vault unlock offers every active logical credential when no browser binding exists", async () => {
+    // Explicit unlock offers every active credential. A synced passkey remains one credential
+    // with bounded variants, while independent providers or authenticators remain separate.
+    // A single `eval` salt is evaluated for whichever credential the user picks.
     mocks.findActiveEnvelopesByUserId.mockResolvedValue([
       {
         id: "env-a",
@@ -470,6 +470,33 @@ describe("passkey service", () => {
     ]);
     expect(call.extensions.prf.eval).toBeDefined();
     expect(call.extensions.prf.evalByCredential).toBeUndefined();
+  });
+
+  it("reports legacy variants that still need authentication confirmation", async () => {
+    mocks.findByUserId.mockResolvedValue([
+      {
+        id: "db-a",
+        credentialId: "vault-a",
+        friendlyName: "Synced passkey",
+        signInEnabled: true,
+        vaultUnlockEnabled: true,
+        prfSupported: true,
+        credentialDeviceType: "multiDevice",
+        backupEligible: true,
+        credentialBackedUp: true,
+      },
+    ]);
+    mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue([
+      { id: "legacy-1", publicMetadata: { credentialId: "vault-a" } },
+    ]);
+
+    const result = await passkeyService.listVaultUnlockCredentials(USER_ID);
+
+    expect(result.passkeys[0]).toMatchObject({
+      activeEnvelopeVariantCount: 1,
+      authenticationConfirmedVariantCount: 0,
+      needsCompatibilityConfirmation: true,
+    });
   });
 
   it("purpose-less verification never returns a vault envelope", async () => {

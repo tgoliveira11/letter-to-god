@@ -50,6 +50,7 @@ export function extractPasskeyPrfOutput(
 }
 
 export {
+  resolvePasskeyPrfEnrollmentAfterRegistration,
   resolvePasskeyPrfCapability,
   sanitizeWebAuthnResponseForServer,
 } from "@tgoliveira/vault-core/browser";

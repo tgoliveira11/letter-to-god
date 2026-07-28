@@ -30,7 +30,7 @@ import {
 } from "@/lib/passkey/vault-unlock-authenticate";
 import { currentDeviceLabel } from "@/lib/passkey/device-label";
 import {
-  prepareAuthenticationOptions,
+  prepareVaultAuthenticationOptions,
   prepareVaultRegistrationOptions,
 } from "@/lib/passkey/prepare-webauthn-options";
 import {
@@ -51,6 +51,7 @@ import {
   PASSKEY_VAULT_UNLOCK_DISABLED_MESSAGE,
   PASSKEY_VAULT_UNLOCK_ENABLED_MESSAGE,
   PASSKEY_VAULT_UNLOCK_ENABLED_REFRESH_WARNING,
+  PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE,
   PASSKEY_VAULT_UNLOCK_TEST_SUCCEEDED_MESSAGE,
 } from "@/lib/passkey/messages";
 import {
@@ -77,7 +78,6 @@ import {
 import {
   assertVaultSessionLeaseCurrent,
   assertVaultSessionOperationCurrent,
-  resolvePasskeyPrfEnrollmentAfterRegistration,
   VaultSessionOperationCancelledError,
 } from "@tgoliveira/vault-core/browser";
 import {
@@ -88,6 +88,10 @@ import { AsyncOwnershipController, isAsyncOwnershipCancellation } from "@/lib/ap
 import type { VaultSessionOperation } from "@tgoliveira/vault-core/browser";
 import { envelopeScope } from "@/lib/vault/vault-envelope-scope";
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
+import {
+  PasskeyAuthenticationPrfUnavailableError,
+  runAuthenticationConfirmedPasskeyEnrollment,
+} from "@/lib/passkey/authentication-confirmed-enrollment";
 
 type VaultUnlockPasskey = {
   id: string;
@@ -100,7 +104,13 @@ type VaultUnlockPasskey = {
   backupEligible?: boolean | null;
   credentialBackedUp?: boolean | null;
   activeEnvelopeVariantCount?: number;
+  authenticationConfirmedVariantCount?: number;
+  needsCompatibilityConfirmation?: boolean;
 };
+
+class PasskeyCompatibilityVariantRequiredError extends Error {
+  override readonly name = "PasskeyCompatibilityVariantRequiredError";
+}
 
 type VaultDeviceBinding = {
   id: string;
@@ -259,9 +269,15 @@ export function PasskeyVaultUnlockSetup({
     availability.state !== "browser_unsupported" &&
     availability.state !== "prf_unsupported";
 
-  async function runCeremonyWithOptions(options: PublicKeyCredentialRequestOptionsJSON) {
+  async function runCeremonyWithOptions(
+    options: PublicKeyCredentialRequestOptionsJSON,
+    credentialId: string
+  ) {
     const assertion = await startAuthentication({
-      optionsJSON: prepareAuthenticationOptions(options),
+      optionsJSON: await prepareVaultAuthenticationOptions(options, userId, {
+        mode: "exact",
+        credentialId,
+      }),
     });
     return assertion;
   }
@@ -303,6 +319,7 @@ export function PasskeyVaultUnlockSetup({
             publicMetadata: {
               credentialId: persisted.verifiedCredentialId,
               prfRequired: true,
+              prfCeremony: "authentication",
             },
           },
         },
@@ -352,66 +369,6 @@ export function PasskeyVaultUnlockSetup({
     });
   }
 
-  /** Append one compatibility variant for an already verified logical credential. */
-  async function appendAndBindEnvelopeVariant(
-    credentialDbId: string,
-    expectedCredentialId: string,
-    vaultKey: CryptoKey
-  ) {
-    const operation = beginVaultOwnerOperation(userId);
-    const enablePath = `/api/account/passkeys/${credentialDbId}/enable-vault-unlock`;
-    const enableOptions = (await apiClient.post(enablePath, {
-      action: "options",
-    })) as PublicKeyCredentialRequestOptionsJSON;
-    const assertion = await runCeremonyWithOptions(enableOptions);
-    assertVaultSessionOperationCurrent(operation);
-    const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
-    const enrollment = await apiClient.post<{
-      verified: true;
-      verifiedCredentialId: string;
-      enrollmentProof: string;
-    }>(enablePath, {
-      action: "verify",
-      response: sanitizeWebAuthnResponseForServer(assertion),
-    });
-    assertVaultSessionOperationCurrent(operation);
-    if (
-      enrollment.verifiedCredentialId !== assertion.id ||
-      enrollment.verifiedCredentialId !== expectedCredentialId
-    ) {
-      throw new Error("Verified passkey credential mismatch.");
-    }
-    const capability = resolvePasskeyPrfCapability({
-      ceremony: "authentication",
-      verifiedCredentialId: enrollment.verifiedCredentialId,
-      clientExtensionResults,
-    });
-    const prfOutput = extractPasskeyPrfOutput(
-      clientExtensionResults,
-      enrollment.verifiedCredentialId
-    );
-    if (capability.state !== "confirmed_authentication" || !prfOutput) {
-      throw new Error(
-        getPasskeyPrfDiagnosticMessage(
-          resolveCeremonyDiagnosticReason({ prfOutputPresent: false })
-        )
-      );
-    }
-
-    try {
-      return await persistAndBindEnvelopeVariant({
-        credentialDbId,
-        expectedCredentialId,
-        vaultKey,
-        prfOutput,
-        enrollmentProof: enrollment.enrollmentProof,
-        operation,
-      });
-    } finally {
-      prfOutput.fill(0);
-    }
-  }
-
   async function verifyAndMatchCandidate(
     assertion: Awaited<ReturnType<typeof startAuthentication>>,
     persistBinding: boolean
@@ -448,11 +405,12 @@ export function PasskeyVaultUnlockSetup({
         cacheInnerKey: false,
       });
       if (match.status !== "matched") {
-        throw new Error(
-          match.status === "no_match"
-            ? "This passkey did not match any saved vault envelope. Unlock with your vault password or recovery phrase before adding a compatibility variant."
-            : "The saved passkey envelope candidates could not be validated."
-        );
+        if (match.status === "no_match") {
+          throw new PasskeyCompatibilityVariantRequiredError(
+            "This passkey authenticated but did not match a saved vault variant. Confirm your vault password or recovery phrase to add an authentication-confirmed compatibility variant."
+          );
+        }
+        throw new Error("The saved passkey envelope candidates could not be validated.");
       }
 
       if (persistBinding) {
@@ -470,6 +428,7 @@ export function PasskeyVaultUnlockSetup({
   }
 
   async function handleRegisterVaultPasskey() {
+    let registrationVerified = false;
     setLoadingId("register");
     setError(null);
     setMessage(null);
@@ -513,44 +472,42 @@ export function PasskeyVaultUnlockSetup({
       })) as {
         credentialDbId?: string;
         verifiedCredentialId?: string;
-        enrollmentProof?: string;
       };
 
       const credentialDbId = registration.credentialDbId;
       if (
         !credentialDbId ||
-        !registration.enrollmentProof ||
         registration.verifiedCredentialId !== attestation.id
       ) {
         throw new Error("Could not set up passkey vault unlock.");
       }
-      const enrollment = resolvePasskeyPrfEnrollmentAfterRegistration({
+      registrationVerified = true;
+      const enablePath = `/api/account/passkeys/${credentialDbId}/enable-vault-unlock`;
+      const enrollment = await runAuthenticationConfirmedPasskeyEnrollment({
+        userId,
         registrationCredentialId: attestation.id,
-        verifiedCredentialId: registration.verifiedCredentialId,
-        clientExtensionResults: attestation.clientExtensionResults as Record<string, unknown>,
+        verifiedRegistrationCredentialId: registration.verifiedCredentialId,
+        registrationClientExtensionResults:
+          attestation.clientExtensionResults as Record<string, unknown>,
+        requestAuthenticationOptions: async () =>
+          apiClient.post<PublicKeyCredentialRequestOptionsJSON>(enablePath, {
+            action: "options",
+          }),
+        verifyAuthentication: async (_verifiedCredentialId, response) =>
+          apiClient.post(enablePath, { action: "verify", response }),
       });
-
-      if (enrollment.status === "ready") {
-        try {
-          await persistAndBindEnvelopeVariant({
-            credentialDbId,
-            expectedCredentialId: enrollment.credentialId,
-            vaultKey,
-            prfOutput: enrollment.prfOutput,
-            enrollmentProof: registration.enrollmentProof,
-            operation,
-          });
-        } finally {
-          enrollment.prfOutput.fill(0);
-        }
-      } else if (enrollment.status === "authentication_required") {
-        await appendAndBindEnvelopeVariant(
+      assertVaultSessionOperationCurrent(operation);
+      try {
+        await persistAndBindEnvelopeVariant({
           credentialDbId,
-          enrollment.credentialId,
-          vaultKey
-        );
-      } else {
-        throw new Error("This passkey did not confirm PRF support for vault unlock.");
+          expectedCredentialId: enrollment.verifiedCredentialId,
+          vaultKey,
+          prfOutput: enrollment.prfOutput,
+          enrollmentProof: enrollment.enrollmentProof,
+          operation,
+        });
+      } finally {
+        enrollment.prfOutput.fill(0);
       }
 
       setMessage(PASSKEY_VAULT_UNLOCK_ENABLED_MESSAGE);
@@ -562,9 +519,18 @@ export function PasskeyVaultUnlockSetup({
         setMessage(PASSKEY_VAULT_UNLOCK_ENABLED_REFRESH_WARNING);
       }
     } catch (e) {
+      if (e instanceof PasskeyAuthenticationPrfUnavailableError) {
+        setDiagnosticReason("prf_not_returned");
+        setError(getPasskeyPrfDiagnosticMessage("prf_not_returned"));
+        return;
+      }
       if (isCeremonyCancellation(e)) {
         setDiagnosticReason("ceremony_cancelled");
-        setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
+        setError(
+          registrationVerified
+            ? PASSKEY_VAULT_CONFIRMATION_CANCELLED_MESSAGE
+            : getPasskeyPrfDiagnosticMessage("ceremony_cancelled")
+        );
         return;
       }
       const registrationMessage = toPasskeyRegistrationErrorMessage(e);
@@ -600,6 +566,14 @@ export function PasskeyVaultUnlockSetup({
       setMessage(PASSKEY_VAULT_UNLOCK_TEST_SUCCEEDED_MESSAGE);
       setDiagnosticReason("supported");
     } catch (e) {
+      if (e instanceof PasskeyCompatibilityVariantRequiredError) {
+        setCompatibilitySecret("");
+        setCompatibilityAuthorization({ passkeyId, kind: "password" });
+        setMessage(
+          "Authentication succeeded. Confirm an independent vault secret below to repair compatibility for this same passkey."
+        );
+        return;
+      }
       if (isCeremonyCancellation(e)) {
         setDiagnosticReason("ceremony_cancelled");
         setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
@@ -625,6 +599,14 @@ export function PasskeyVaultUnlockSetup({
       setDiagnosticReason("supported");
       await loadPasskeys();
     } catch (e) {
+      if (e instanceof PasskeyCompatibilityVariantRequiredError) {
+        setCompatibilitySecret("");
+        setCompatibilityAuthorization({ passkeyId, kind: "password" });
+        setMessage(
+          "Authentication succeeded. Confirm an independent vault secret below to repair compatibility for this same passkey."
+        );
+        return;
+      }
       if (isCeremonyCancellation(e)) {
         setDiagnosticReason("ceremony_cancelled");
         setError(getPasskeyPrfDiagnosticMessage("ceremony_cancelled"));
@@ -643,12 +625,10 @@ export function PasskeyVaultUnlockSetup({
     setLoadingId(passkeyId);
     setError(null);
     setMessage(null);
-    setDiagnosticReason(null);
+      setDiagnosticReason(null);
     try {
       const passkey = passkeys.find((item) => item.id === passkeyId);
-      if (!passkey || !vaultUnlocked) {
-        throw new Error("Unlock your vault before adding a compatibility variant.");
-      }
+      if (!passkey) throw new Error("Passkey not found.");
       if (!compatibilitySecret) {
         throw new Error("Enter your vault password or recovery phrase.");
       }
@@ -664,7 +644,7 @@ export function PasskeyVaultUnlockSetup({
       const enableOptions = (await apiClient.post(enablePath, {
         action: "options",
       })) as PublicKeyCredentialRequestOptionsJSON;
-      const assertion = await runCeremonyWithOptions(enableOptions);
+      const assertion = await runCeremonyWithOptions(enableOptions, passkey.credentialId);
       assertVaultSessionOperationCurrent(operation);
       const clientExtensionResults = assertion.clientExtensionResults as Record<string, unknown>;
       const enrollment = await apiClient.post<{
@@ -747,7 +727,9 @@ export function PasskeyVaultUnlockSetup({
       } finally {
         prfOutput.fill(0);
       }
-      setMessage("A compatibility envelope variant was added and verified on this browser.");
+      setMessage(
+        "Passkey compatibility was confirmed. A new authentication-derived variant was appended and selected for this browser."
+      );
       setDiagnosticReason("supported");
       setCompatibilityAuthorization(null);
       await loadPasskeys();
@@ -907,6 +889,11 @@ export function PasskeyVaultUnlockSetup({
               setupAllowed &&
               availability.state !== "browser_unsupported" &&
               availability.state !== "prf_unsupported";
+            const canConfirmCompatibility =
+              vaultConfigured &&
+              !managementBlocked &&
+              availability.state !== "browser_unsupported" &&
+              availability.state !== "prf_unsupported";
             return (
               <li
                 key={passkey.id}
@@ -926,6 +913,9 @@ export function PasskeyVaultUnlockSetup({
                     ) : null}
                     {passkey.credentialDeviceType === "multiDevice" ? (
                       <Badge variant="info">Synced credential</Badge>
+                    ) : null}
+                    {passkey.needsCompatibilityConfirmation ? (
+                      <Badge variant="muted">Compatibility confirmation needed</Badge>
                     ) : null}
                   </div>
                 </div>
@@ -950,7 +940,7 @@ export function PasskeyVaultUnlockSetup({
                       ) : null}
                       <Button
                         variant="secondary"
-                        disabled={!canManage || loadingId === passkey.id}
+                        disabled={!canConfirmCompatibility || loadingId === passkey.id}
                         onClick={() => {
                           setCompatibilitySecret("");
                           setCompatibilityAuthorization({
@@ -959,7 +949,9 @@ export function PasskeyVaultUnlockSetup({
                           });
                         }}
                       >
-                        Add compatibility variant
+                        {passkey.needsCompatibilityConfirmation
+                          ? "Confirm compatibility"
+                          : "Add compatibility variant"}
                       </Button>
                       <Button
                         variant="secondary"
@@ -986,10 +978,11 @@ export function PasskeyVaultUnlockSetup({
           }}
         >
           <div className="space-y-1">
-            <p className="font-medium text-[var(--foreground)]">Authorize compatibility variant</p>
+            <p className="font-medium text-[var(--foreground)]">Confirm passkey compatibility</p>
             <p className="text-sm text-[var(--muted)]">
-              Confirm an independent vault secret locally. The secret and passkey PRF output never
-              leave this browser.
+              Confirm an independent vault secret locally, then approve one passkey authentication
+              prompt. The secret and PRF output never leave this browser. Existing variants are
+              preserved.
             </p>
           </div>
           <label className="block space-y-1 text-sm">
@@ -1038,7 +1031,7 @@ export function PasskeyVaultUnlockSetup({
           </label>
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={Boolean(loadingId) || !compatibilitySecret}>
-              {loadingId ? "Working…" : "Confirm and add variant"}
+              {loadingId ? "Working…" : "Continue to passkey"}
             </Button>
             <Button
               type="button"

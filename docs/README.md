@@ -17,7 +17,7 @@ Phases 0–5 of the MVP are **complete**. The active implementation domain is **
 | [`LTG_VAULT_IMPLEMENTATION_PLAN.md`](./LTG_VAULT_IMPLEMENTATION_PLAN.md) | Phased engineering plan (completed) |
 | [`ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md`](./ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md) | Vault crypto, note keys, recovery phrase |
 | `@tgoliveira/vault-core` package docs | **Single source of truth for vault + passkey PRF unlock** — `README.md`, `docs/IMPLEMENTATION_GUIDE.md`, `PASSKEY_PRF_ENVELOPES.md` |
-| [`VAULT_CORE_1_6_ADOPTION.md`](./VAULT_CORE_1_6_ADOPTION.md) | SelahKeep-specific vault-core 1.6.0 and secure-auth 0.8.0 integration contract |
+| [`VAULT_CORE_1_6_ADOPTION.md`](./VAULT_CORE_1_6_ADOPTION.md) | SelahKeep-specific vault-core 1.6.1 and secure-auth 0.8.0 integration contract |
 | [`LTG_VAULT_MVP_ACCEPTANCE_CHECKLIST.md`](./LTG_VAULT_MVP_ACCEPTANCE_CHECKLIST.md) | MVP acceptance traceability |
 | [`UI_UX_DIRECTION.md`](./UI_UX_DIRECTION.md) | Purple SelahKeep UI tone & direction |
 | [`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md) | Visual design system ("Stillness") — tokens, type, components, dark mode (source specs in `design/`) |

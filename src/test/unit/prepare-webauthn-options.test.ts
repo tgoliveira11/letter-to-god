@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   prepareAuthenticationOptions,
+  prepareVaultAuthenticationOptions,
   prepareRegistrationOptions,
   prepareWebAuthnExtensions,
   alignPrfExtensionsForAllowCredentials,
@@ -120,5 +121,24 @@ describe("prepareWebAuthnExtensions", () => {
     );
     expect(aligned.extensions?.prf?.eval?.first).toBeInstanceOf(ArrayBuffer);
     expect(aligned.extensions?.prf?.evalByCredential).toBeUndefined();
+  });
+
+  it("uses vault-core exact selection while preserving stored transports", async () => {
+    const prepared = await prepareVaultAuthenticationOptions(
+      {
+        challenge: "abc",
+        allowCredentials: [
+          { id: "vault-a", type: "public-key", transports: ["internal"] },
+          { id: "vault-b", type: "public-key", transports: ["hybrid", "usb"] },
+        ],
+      },
+      userId,
+      { mode: "exact", credentialId: "vault-b" }
+    );
+
+    expect(prepared.allowCredentials).toEqual([
+      { id: "vault-b", type: "public-key", transports: ["hybrid", "usb"] },
+    ]);
+    expect(prepared.extensions?.prf?.eval?.first).toBeInstanceOf(ArrayBuffer);
   });
 });

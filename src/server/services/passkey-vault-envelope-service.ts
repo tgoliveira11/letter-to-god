@@ -23,10 +23,14 @@ import { ChallengeError, NotFoundError } from "@/server/services/passkey-service
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
 import {
   vaultBindingProofAudience,
-  vaultEnvelopeEnrollmentProofAudience,
+  vaultEnvelopeAuthenticationProofAudience,
   vaultPasskeyEnrollmentChallenge,
 } from "@/lib/passkey/challenge-audiences";
 import { resolvePasskeyCounterAdvance } from "@/lib/passkey/passkey-counter";
+import {
+  AUTHENTICATION_CONFIRMED_PRF_CEREMONY,
+  isAuthenticationConfirmedPasskeyVariant,
+} from "@/lib/passkey/passkey-envelope-variant-metadata";
 
 const rpID = getWebAuthnRpId();
 const origins = getWebAuthnOrigins();
@@ -152,23 +156,10 @@ async function getVaultUnlockAuthOptions(
 
 /** Product-only passkey envelope persistence; WebAuthn verification stays app-owned. */
 export const passkeyVaultEnvelopeService = {
-  async issueRegistrationEnrollmentProof(
-    userId: string,
-    verifiedCredentialId: string
-  ) {
+  async resolveCredentialDbId(userId: string, verifiedCredentialId: string) {
     const credential = await passkeyRepository.findByCredentialId(verifiedCredentialId);
-    if (!credential || credential.userId !== userId || credential.vaultUnlockEnabled) {
-      throw new NotFoundError("Passkey is not eligible for vault enrollment");
-    }
-    const enrollmentProof = await issueProof(
-      userId,
-      vaultEnvelopeEnrollmentProofAudience(credential.id)
-    );
-    return {
-      credentialDbId: credential.id,
-      verifiedCredentialId: credential.credentialId,
-      enrollmentProof,
-    };
+    if (!credential || credential.userId !== userId) throw new NotFoundError("Passkey not found");
+    return credential.id;
   },
 
   async getVaultUnlockAuthOptions(userId: string, credentialDbId: string, ip?: string) {
@@ -221,7 +212,7 @@ export const passkeyVaultEnvelopeService = {
     const { credential } = await verifyPasskeyAuthentication(userId, credentialDbId, response);
     const enrollmentProof = await issueProof(
       userId,
-      vaultEnvelopeEnrollmentProofAudience(credential.id)
+      vaultEnvelopeAuthenticationProofAudience(credential.id)
     );
     return {
       verified: true,
@@ -244,7 +235,7 @@ export const passkeyVaultEnvelopeService = {
     try {
       await passkeyRepository.consumeValidChallenge(
         enrollmentProof,
-        vaultEnvelopeEnrollmentProofAudience(credential.id),
+        vaultEnvelopeAuthenticationProofAudience(credential.id),
         userId
       );
     } catch {
@@ -273,7 +264,11 @@ export const passkeyVaultEnvelopeService = {
           passkeyCredentialId: credential.id,
           method: "passkey_authorized_device",
           encryptedVaultKey,
-          publicMetadata: { credentialId: credential.credentialId, prfRequired: true },
+          publicMetadata: {
+            credentialId: credential.credentialId,
+            prfRequired: true,
+            prfCeremony: AUTHENTICATION_CONFIRMED_PRF_CEREMONY,
+          },
         },
         tx
       );
@@ -310,6 +305,9 @@ export const passkeyVaultEnvelopeService = {
       credential.id,
       credential.credentialId
     );
+    const authenticationConfirmedVariantCount = variants.filter(
+      isAuthenticationConfirmedPasskeyVariant
+    ).length;
     return {
       signInEnabled: credential.signInEnabled,
       vaultUnlockEnabled: Boolean(credential.vaultUnlockEnabled && variants.length > 0),
@@ -319,6 +317,11 @@ export const passkeyVaultEnvelopeService = {
       backupEligible: credential.backupEligible,
       credentialBackedUp: credential.credentialBackedUp,
       activeEnvelopeVariantCount: variants.length,
+      authenticationConfirmedVariantCount,
+      needsCompatibilityConfirmation:
+        credential.vaultUnlockEnabled &&
+        variants.length > 0 &&
+        authenticationConfirmedVariantCount === 0,
     };
   },
 

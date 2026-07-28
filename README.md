@@ -91,14 +91,14 @@ Production hides `/api-docs` unless `ENABLE_API_DOCS=true` in `.env.local`.
 ## Passkeys (sign-in and vault unlock)
 
 - **Sign in with passkey** on `/login` — phishing-resistant account authentication; an account with TOTP enabled still completes TOTP before receiving a full session
-- **Account settings → Passkeys** — register sign-in passkeys through secure-auth; while the vault is open, an explicit opt-in can use the same creation ceremony for vault unlock
+- **Account settings → Passkeys** — register sign-in passkeys through secure-auth; while the vault is open, an explicit opt-in can confirm the exact new credential with one authentication prompt for vault unlock
 - **`/vault/settings` → Passkey vault unlock** — enable, test, add a synced-credential compatibility variant, bind/unbind this browser, or disable vault unlock (requires WebAuthn PRF; compatibility repair also requires a local vault password or recovery phrase)
 - **`/vault/security`** — vault security review: health summary, protection status, recovery phrase drill (local-only), passkey compatibility, and recent safe vault security events (entry from Vault settings)
 - **`/vault/recovery`** — recovery phrase management; optional link to vault settings for passkey vault unlock
 - **Passkey sign-in** authenticates the account through secure-auth. A passkey already enabled for both capabilities may also open the vault locally after the final account session exists; account login still succeeds if vault PRF/candidate unwrap is unavailable.
 - Details: [`docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md`](docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md)
 
-Run `npm run db:migrate` after pulling schema updates. Vault-core 1.6.0 uses the existing `0021_vault_passkey_multi_device_variants.sql` schema; secure-auth 0.8.0 additionally requires `0022_secure_auth_user_preferences.sql` and `0023_secure_auth_passkey_counter_revision.sql`. See [`docs/VAULT_CORE_1_6_ADOPTION.md`](docs/VAULT_CORE_1_6_ADOPTION.md).
+Run `npm run db:migrate` after pulling schema updates. Vault-core 1.6.1 uses the existing `0021_vault_passkey_multi_device_variants.sql` schema; this correction stores its confirmation marker in existing JSONB metadata and adds no migration. secure-auth 0.8.0 additionally requires `0022_secure_auth_user_preferences.sql` and `0023_secure_auth_passkey_counter_revision.sql`. See [`docs/VAULT_CORE_1_6_ADOPTION.md`](docs/VAULT_CORE_1_6_ADOPTION.md).
 
 ## Two-factor authentication (optional)
 

@@ -1263,6 +1263,24 @@ paths:
       responses:
         '200':
           description: Vault passkeys removed and browser binding cookie cleared
+  /api/passkeys/account-registration-vault:
+    post:
+      tags: [Passkeys]
+      summary: Confirm an account-created credential for vault unlock (options, sanitized exact verify, or encrypted persist)
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Exact WebAuthn options, authentication-derived proof, or persisted variant identity; never PRF output
+  /api/passkeys/account-login-vault-candidates:
+    post:
+      tags: [Passkeys]
+      summary: Load encrypted vault candidates after final account passkey authentication
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Verified credential identity, opaque binding proof, and bounded ciphertext candidates
   /api/passkeys:
     delete:
       tags: [Passkeys]

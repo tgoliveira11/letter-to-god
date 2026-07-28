@@ -194,14 +194,24 @@ describe("passkey vault lifecycle", () => {
       expect.objectContaining({
         passkeyCredentialId: "db-synced",
         method: "passkey_authorized_device",
+        publicMetadata: expect.objectContaining({
+          credentialId: "synced-credential",
+          prfCeremony: "authentication",
+          prfRequired: true,
+        }),
       }),
       expect.anything()
+    );
+    expect(mocks.consumeValidChallenge).toHaveBeenCalledWith(
+      "enrollment-proof",
+      "selahkeep:vault:envelope:authentication-confirmed:db-synced",
+      USER_ID
     );
     expect(mocks.revokePasskeyEnvelopeVariants).not.toHaveBeenCalled();
     expect(result.envelopeVariantId).toBe("550e8400-e29b-41d4-a716-446655440001");
   });
 
-  it("issues a registration receipt only for an exact account credential without vault capability", async () => {
+  it("resolves only an exact account credential and does not mint a registration proof", async () => {
     mocks.findByCredentialId.mockResolvedValue({
       id: "db-account",
       userId: USER_ID,
@@ -209,21 +219,13 @@ describe("passkey vault lifecycle", () => {
       vaultUnlockEnabled: false,
     });
 
-    const result = await passkeyVaultEnvelopeService.issueRegistrationEnrollmentProof(
+    const result = await passkeyVaultEnvelopeService.resolveCredentialDbId(
       USER_ID,
       "account-credential"
     );
 
-    expect(result).toMatchObject({
-      credentialDbId: "db-account",
-      verifiedCredentialId: "account-credential",
-    });
-    expect(mocks.storeChallenge).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: USER_ID,
-        type: "selahkeep:vault:envelope:enrollment:db-account",
-      })
-    );
+    expect(result).toBe("db-account");
+    expect(mocks.storeChallenge).not.toHaveBeenCalled();
   });
 
   it("returns only bounded candidates for the exact dual-capability login credential", async () => {
