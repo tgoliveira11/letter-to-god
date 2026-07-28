@@ -19,6 +19,7 @@ const authSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("options"),
     purpose: z.literal("vault_unlock"),
+    intent: z.enum(["explicit", "quick"]).default("explicit"),
     credentialId: z.string().min(1).max(2048).optional(),
   }),
   z.object({
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
         getClientIp(request),
         {
           purpose: parsed.data.purpose,
-          deviceBindingId,
+          deviceBindingId: parsed.data.intent === "quick" ? deviceBindingId : undefined,
           credentialId: parsed.data.credentialId,
         }
       );

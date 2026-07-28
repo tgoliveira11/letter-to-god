@@ -227,6 +227,7 @@ Mapped in `src/lib/config/vault-password-policy.ts` and passed explicitly to `Pa
 | `VAULT_PASSWORD_REQUIRE_SYMBOL` | Optional | Production | `false` | `/vault/setup` | Require symbol | |
 | `VAULT_PASSWORD_BLOCK_COMMON_PASSWORDS` | Optional | Production | `true` | `/vault/setup` | Block common passwords | |
 | `VAULT_PASSWORD_MIN_SCORE` | Optional | Production | `2` | `/vault/setup` | Strength min score 0–4 | |
+| `VAULT_EMERGENCY_MODE_ENABLED` | Optional | All | `false` | vault-core admin config | Emergency/duress package gate | Keep `false`. SelahKeep does not ship the app-owned decoy persistence/routing/exit workflow, so enabling the package flag alone is unsupported. |
 
 ### Cookies, email registration, debug, product limits
 
@@ -293,6 +294,7 @@ WEBAUTHN_RP_ID=selahkeep.com
 WEBAUTHN_ORIGIN=https://www.selahkeep.com
 AUTH_RATE_LIMIT_STORE=postgres
 RATE_LIMIT_STORE=postgres
+VAULT_EMERGENCY_MODE_ENABLED=false
 ```
 
 Add OAuth variables only for providers you enable. Run database migrations against `DATABASE_URL` before first production traffic.

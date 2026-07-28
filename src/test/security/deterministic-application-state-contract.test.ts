@@ -14,8 +14,8 @@ describe("deterministic application-state contract", () => {
       dependencies: Record<string, string>;
     };
     expect(packageJson.dependencies).toMatchObject({
-      "@tgoliveira/secure-auth": "0.7.0",
-      "@tgoliveira/vault-core": "1.5.1",
+      "@tgoliveira/secure-auth": "0.8.0",
+      "@tgoliveira/vault-core": "1.6.0",
       "@tgoliveira/outpost": "1.2.2",
       next: "16.2.11",
       "next-auth": "4.24.15",
@@ -72,6 +72,10 @@ describe("deterministic application-state contract", () => {
       'CREATE TABLE "user_preferences"'
     );
     expect(source("src/lib/secure-auth-schema.ts")).toContain('"user_preferences"');
+    expect(source("drizzle/0023_secure_auth_passkey_counter_revision.sql")).toContain(
+      'ADD COLUMN IF NOT EXISTS "counter_revision" integer DEFAULT 0 NOT NULL'
+    );
+    expect(source("src/lib/secure-auth-schema.ts")).toContain('"counter_revision"');
   });
 
   it("persists password KDF upgrades only through the lease-guarded ciphertext route", () => {

@@ -30,7 +30,10 @@ const REQUIRED_AUTH_TABLES = [
   "invite_uses",
   "login_attempt_counters",
   "user_preferences",
+  "passkey_credentials",
 ] as const;
+
+const REQUIRED_PASSKEY_CREDENTIAL_COLUMNS = ["counter_revision"] as const;
 
 export class SecureAuthDatabaseNotReadyError extends Error {
   constructor(message: string) {
@@ -91,6 +94,24 @@ async function verifySecureAuthDatabaseSchema(): Promise<void> {
   if (missingColumns.length > 0) {
     throw new SecureAuthDatabaseNotReadyError(
       `Auth database schema is missing users column(s): ${missingColumns.join(", ")}. ${migrationHint()}`
+    );
+  }
+
+
+  const passkeyColumns = await sql<{ column_name: string }[]>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'passkey_credentials'
+  `;
+
+  const passkeyColumnNames = new Set(passkeyColumns.map((row) => row.column_name));
+  const missingPasskeyColumns = REQUIRED_PASSKEY_CREDENTIAL_COLUMNS.filter(
+    (name) => !passkeyColumnNames.has(name)
+  );
+  if (missingPasskeyColumns.length > 0) {
+    throw new SecureAuthDatabaseNotReadyError(
+      `Auth database schema is missing passkey_credentials column(s): ${missingPasskeyColumns.join(", ")}. ${migrationHint()}`
     );
   }
 }

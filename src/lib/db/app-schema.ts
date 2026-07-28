@@ -23,6 +23,7 @@ export const passkeyCredentials = pgTable("passkey_credentials", {
   credentialId: text("credential_id").notNull().unique(),
   publicKey: text("public_key").notNull(),
   counter: text("counter").notNull().default("0"),
+  counterRevision: integer("counter_revision").notNull().default(0),
   transports: jsonb("transports"),
   friendlyName: text("friendly_name"),
   signInEnabled: boolean("sign_in_enabled").notNull().default(true),

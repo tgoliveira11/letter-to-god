@@ -22,12 +22,35 @@ const mocks = vi.hoisted(() => ({
   unlockCandidates: vi.fn(),
   resolveCapability: vi.fn(),
   probeEnvironment: vi.fn(),
+  createIndependentVariant: vi.fn(),
 }));
 
 vi.mock("@/lib/api-client/vault", () => ({
   vaultApi: {
     status: mocks.vaultStatus,
+    unlockEnvelope: vi.fn(async () => ({
+      encryptedVaultKey: {
+        version: "enc-v1",
+        alg: "AES-GCM",
+        iv: "source-iv",
+        ciphertext: "source-ciphertext",
+        aad: { userId: USER_ID, resourceId: USER_ID, field: "vault_key" },
+      },
+      kdfMetadata: {
+        kdf: "argon2id",
+        version: "kdf-v2",
+        salt: "source-salt",
+        memory: 65536,
+        iterations: 3,
+        parallelism: 1,
+      },
+    })),
   },
+}));
+
+vi.mock("@tgoliveira/vault-core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tgoliveira/vault-core")>()),
+  createPasskeyPrfEnvelopeAfterIndependentAuthorization: mocks.createIndependentVariant,
 }));
 
 vi.mock("@/lib/crypto-client/vault", () => ({
@@ -72,6 +95,7 @@ vi.mock("@/lib/crypto-client/vault-session", async (importOriginal) => ({
 vi.mock("@/lib/passkey/prepare-webauthn-options", () => ({
   prepareAuthenticationOptions: (options: unknown) => options,
   prepareRegistrationOptions: (options: unknown) => options,
+  prepareVaultRegistrationOptions: (options: unknown) => options,
   alignPrfExtensionsForAllowCredentials: (options: unknown) => options,
 }));
 
@@ -155,6 +179,7 @@ describe("PasskeyVaultUnlockSetup", () => {
           verified: true,
           credentialDbId: "pk-new",
           verifiedCredentialId: "cred-new",
+          enrollmentProof: "registration-enrollment-proof",
         };
       }
       // Vault-only setup step 2 + unlock/test: single-credential auth (get) options.
@@ -215,10 +240,20 @@ describe("PasskeyVaultUnlockSetup", () => {
     );
     mocks.startRegistration.mockResolvedValue({
       id: "cred-new",
-      clientExtensionResults: {},
+      clientExtensionResults: {
+        prf: { enabled: true, results: { first: new ArrayBuffer(32) } },
+      },
     });
     mocks.extractPasskeyPrfOutput.mockReturnValue(new Uint8Array(32));
     mocks.wrapVaultKeyForPasskey.mockResolvedValue({ version: "enc-v1" });
+    mocks.createIndependentVariant.mockResolvedValue({
+      vaultKey: {} as CryptoKey,
+      envelope: {
+        method: "passkey_prf",
+        encryptedVaultKey: { version: "enc-v1" },
+        kdfMetadata: null,
+      },
+    });
     mocks.resolveCapability.mockReturnValue({ state: "confirmed_authentication" });
     mocks.unlockCandidates.mockResolvedValue({
       status: "matched",
@@ -303,23 +338,13 @@ describe("PasskeyVaultUnlockSetup", () => {
         "/api/passkeys/register",
         expect.objectContaining({ action: "verify", vaultOnly: true })
       );
-      // Step 2: create the envelope from an authentication (get) PRF via enable.
-      expect(mocks.apiPost).toHaveBeenCalledWith(
-        "/api/account/passkeys/pk-new/enable-vault-unlock",
-        { action: "options" }
-      );
-      expect(mocks.apiPost).toHaveBeenCalledWith(
-        "/api/account/passkeys/pk-new/enable-vault-unlock",
-        expect.objectContaining({
-          action: "verify",
-          response: expect.any(Object),
-        })
-      );
+      // Registration-time PRF output avoids a second WebAuthn prompt.
+      expect(mocks.startAuthentication).not.toHaveBeenCalled();
       expect(mocks.apiPost).toHaveBeenCalledWith(
         "/api/account/passkeys/pk-new/enable-vault-unlock",
         expect.objectContaining({
           action: "persist",
-          enrollmentProof: "enrollment-proof",
+          enrollmentProof: "registration-enrollment-proof",
           encryptedVaultKey: expect.anything(),
         })
       );
@@ -363,6 +388,10 @@ describe("PasskeyVaultUnlockSetup", () => {
   });
 
   it("shows prf_not_returned when ceremony omits PRF output", async () => {
+    mocks.startRegistration.mockResolvedValue({
+      id: "cred-new",
+      clientExtensionResults: { prf: { enabled: true } },
+    });
     mocks.extractPasskeyPrfOutput.mockReturnValue(null);
     render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked />);
     fireEvent.click(await screen.findByRole("button", { name: /set up passkey vault unlock/i }));
@@ -493,6 +522,7 @@ describe("PasskeyVaultUnlockSetup", () => {
         action: "options",
         purpose: "vault_unlock",
         credentialId: "cred-1",
+        intent: "explicit",
       });
     });
     expect(await screen.findByText(PASSKEY_VAULT_UNLOCK_TEST_SUCCEEDED_MESSAGE)).toBeTruthy();
@@ -512,8 +542,21 @@ describe("PasskeyVaultUnlockSetup", () => {
 
     render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked />);
     fireEvent.click(await screen.findByRole("button", { name: /add compatibility variant/i }));
+    fireEvent.change(screen.getByLabelText(/vault password/i), {
+      target: { value: "correct horse battery staple" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /confirm and add variant/i }));
 
     await waitFor(() => {
+      expect(mocks.createIndependentVariant).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authorization: expect.objectContaining({
+            kind: "password",
+            password: "correct horse battery staple",
+          }),
+          verifiedCredentialId: "cred-1",
+        })
+      );
       expect(mocks.apiPost).toHaveBeenCalledWith(
         "/api/account/passkeys/pk-1/enable-vault-unlock",
         expect.objectContaining({ action: "persist", enrollmentProof: "enrollment-proof" })

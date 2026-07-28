@@ -1,6 +1,6 @@
 # Auth reset to `@tgoliveira/secure-auth`
 
-Branch: `main` (Phase 0 complete) · **Current pin:** `0.5.1` (see `package.json`)
+Branch: `main` (Phase 0 complete) · **Current pin:** `0.8.0` (see `package.json`)
 
 ## Goal
 
@@ -50,17 +50,17 @@ Package owns: login, register, OAuth, account passkey sign-in, 2FA, password flo
 
 | Flow | Owner |
 |------|-------|
-| Account passkey sign-in | **Package** (`passkeyLoginOptions`, `passkeyLoginVerify`, package `signInWithPasskey`) |
+| Account passkey sign-in | **Package** (`passkeyLoginOptions`, `passkeyLoginVerify`, package `signInWithPasskey`); optional app hook runs only after final authentication |
 | Account passkey management (list/register/delete) | **Package** (`passkeysList`, `passkeyRegister`, `passkeyById`) |
 | Explicit vault passkey unlock | **Product** (`/api/passkeys/authenticate`, after account sign-in) |
 | Recovery passkey register/authenticate | **Product** (`/api/passkeys/**`, `passkeyService`) |
 | Enable vault unlock on existing account passkey | **Product** (`passkeyVaultEnvelopeService`) |
+| Enable account sign-in on a vault-only passkey | **Package** (`passkeyEnableSignIn`; exact credential + UV verification) |
 
 ### TODO_SECURITY_REVIEW_REQUIRED
 
-- Account passkey login intentionally does not unlock the vault. Users unlock explicitly from `/vault/unlock` or the vault dock.
-- Package `PasskeySettings` may not surface `vaultUnlockEnabled` / enable-vault-unlock UX; product route remains but settings integration needs UX review.
-- Shared `passkey_credentials` table: package writes sign-in credentials; product writes vault flags/envelopes. Coordinate schema migrations with package `authSchema`.
+- Optional account-login vault unlock is fail-open for account authentication, runs only after the final session, and keeps PRF output browser-only.
+- Shared `passkey_credentials` table: package writes sign-in credentials; product writes vault flags/envelopes. Migration `0023` provides the shared counter revision required by both verification paths.
 
 ## Database
 
@@ -95,4 +95,4 @@ npm run dev   # confirm http://localhost:3001/ loads
 
 ## Phase 0 status
 
-**Complete on `main`.** Account/auth is owned exclusively by `@tgoliveira/secure-auth` (currently `0.5.1`). Guard tests: `no-local-auth-implementation.test.ts`, `secure-auth-delegate-routes.test.ts`, `secure-auth-env-and-imports.test.ts`.
+**Complete on `main`.** Account/auth is owned exclusively by `@tgoliveira/secure-auth` (currently `0.8.0`). Guard tests: `no-local-auth-implementation.test.ts`, `secure-auth-delegate-routes.test.ts`, `secure-auth-env-and-imports.test.ts`.

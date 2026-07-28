@@ -96,7 +96,7 @@ Offline support does not copy private resource state into a global store. Encryp
 
 ## Preferences API and migration
 
-SelahKeep delegates preferences to secure-auth 0.7.0:
+SelahKeep delegates preferences to secure-auth 0.8.0:
 
 | Method/path | Purpose |
 |---|---|
@@ -104,7 +104,7 @@ SelahKeep delegates preferences to secure-auth 0.7.0:
 | `GET/PUT/DELETE /api/account/preferences/[key]` | Manage a namespaced preference |
 | `GET /api/account/preferences/export` | Export account preferences |
 
-Migration `0022_secure_auth_user_preferences.sql` creates the package-owned `user_preferences` table. It stores the vault auto-lock duration as account configuration, not vault key material or note plaintext. `@tgoliveira/vault-core@1.5.1` requires no SelahKeep database migration.
+Migration `0022_secure_auth_user_preferences.sql` creates the package-owned `user_preferences` table. Migration `0023_secure_auth_passkey_counter_revision.sql` adds compare-and-set revisioning for the shared WebAuthn counter. Neither stores vault key material or note plaintext.
 
 ### Rollout and backout
 
@@ -116,8 +116,8 @@ The migration is additive. Application rollback may safely leave `user_preferenc
 
 The deterministic state contract is pinned to:
 
-- `@tgoliveira/secure-auth@0.7.0`
-- `@tgoliveira/vault-core@1.5.1`
+- `@tgoliveira/secure-auth@0.8.0`
+- `@tgoliveira/vault-core@1.6.0`
 - `@tgoliveira/outpost@1.2.2`
 - `next@16.2.11`
 - `next-auth@4.24.15`

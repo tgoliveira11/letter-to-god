@@ -13,6 +13,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Unified account/vault passkeys.** An explicitly opted-in account passkey can reuse its registration ceremony for vault unlock, and an already dual-capability passkey can open the vault locally after secure-auth finishes the account session. Account auth and vault access remain independently usable.
+
+### Changed
+
+- **Dependency baseline.** Pinned `@tgoliveira/vault-core@1.6.0` and `@tgoliveira/secure-auth@0.8.0`.
+- **Passkey registration UX.** Vault enrollment uses registration-time PRF output when available, avoiding the previous second passkey prompt; a typed authentication fallback remains for compatible authenticators that omit registration output.
+- **Explicit vs quick unlock.** Full unlock always uses the active credential allow-list, while dock quick unlock remains an exact browser-binding optimization.
+
+### Security
+
+- **Shared WebAuthn counter CAS.** Migration `0023_secure_auth_passkey_counter_revision.sql` adds revisioned compare-and-set updates, including counterless authenticators, across secure-auth and product vault verification.
+- **Independent compatibility repair.** Synced-passkey `no_match` repair now requires a local vault password or recovery phrase through vault-core 1.6.0; it cannot rely on a session UVK or browser binding alone.
+- **Browser-only PRF interop.** secure-auth owns account assertion sanitization, verification, and counter updates. SelahKeep receives only the verified credential ID after the final session and keeps PRF bytes exclusively in browser memory.
+- **Emergency mode off.** The vault-core emergency/duress UI gate is explicitly disabled in SelahKeep; no emergency state or controls are exposed.
+
 ## [0.3.4] - 2026-07-27
 
 ### Added

@@ -46,6 +46,7 @@ describe("vault unlock authenticate client", () => {
     expect(mocks.apiPost).toHaveBeenCalledWith("/api/passkeys/authenticate", {
       action: "options",
       purpose: VAULT_UNLOCK_AUTHENTICATE_PURPOSE,
+      intent: "explicit",
     });
   });
 
@@ -155,6 +156,7 @@ describe("vault unlock authenticate client", () => {
       action: "options",
       purpose: VAULT_UNLOCK_AUTHENTICATE_PURPOSE,
       credentialId: "vault-cred",
+      intent: "explicit",
     });
     expect(mocks.startAuthentication).toHaveBeenCalled();
   });

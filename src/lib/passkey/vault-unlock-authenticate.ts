@@ -54,11 +54,13 @@ export function prepareVaultUnlockAuthenticationOptions(
 }
 
 export async function requestVaultUnlockAuthenticationOptions(
-  credentialId?: string
+  credentialId?: string,
+  intent: "explicit" | "quick" = "explicit"
 ): Promise<PublicKeyCredentialRequestOptionsJSON> {
   const options = (await apiClient.post("/api/passkeys/authenticate", {
     action: "options",
     purpose: VAULT_UNLOCK_AUTHENTICATE_PURPOSE,
+    intent,
     ...(credentialId ? { credentialId } : {}),
   })) as PublicKeyCredentialRequestOptionsJSON;
 
@@ -79,7 +81,7 @@ export async function runVaultUnlockAuthenticationCeremonyWithOptions(
 export async function runVaultUnlockAuthenticationCeremony(
   credentialId?: string
 ): Promise<Awaited<ReturnType<typeof startAuthentication>>> {
-  const options = await requestVaultUnlockAuthenticationOptions(credentialId);
+  const options = await requestVaultUnlockAuthenticationOptions(credentialId, "explicit");
   return runVaultUnlockAuthenticationCeremonyWithOptions(options, credentialId);
 }
 

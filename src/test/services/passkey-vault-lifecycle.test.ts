@@ -4,6 +4,7 @@ import { encryptedPayload, USER_ID } from "@/test/helpers/fixtures";
 
 const mocks = vi.hoisted(() => ({
   findByIdForUser: vi.fn(),
+  findByCredentialId: vi.fn(),
   consumeValidChallenge: vi.fn(),
   lockForVaultMutation: vi.fn(),
   updateCredentialFlags: vi.fn(),
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/server/repositories/passkey-repository", () => ({
   passkeyRepository: {
     findByIdForUser: mocks.findByIdForUser,
+    findByCredentialId: mocks.findByCredentialId,
     consumeValidChallenge: mocks.consumeValidChallenge,
     lockForVaultMutation: mocks.lockForVaultMutation,
     updateCredentialFlags: mocks.updateCredentialFlags,
@@ -197,5 +199,91 @@ describe("passkey vault lifecycle", () => {
     );
     expect(mocks.revokePasskeyEnvelopeVariants).not.toHaveBeenCalled();
     expect(result.envelopeVariantId).toBe("550e8400-e29b-41d4-a716-446655440001");
+  });
+
+  it("issues a registration receipt only for an exact account credential without vault capability", async () => {
+    mocks.findByCredentialId.mockResolvedValue({
+      id: "db-account",
+      userId: USER_ID,
+      credentialId: "account-credential",
+      vaultUnlockEnabled: false,
+    });
+
+    const result = await passkeyVaultEnvelopeService.issueRegistrationEnrollmentProof(
+      USER_ID,
+      "account-credential"
+    );
+
+    expect(result).toMatchObject({
+      credentialDbId: "db-account",
+      verifiedCredentialId: "account-credential",
+    });
+    expect(mocks.storeChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        type: "selahkeep:vault:envelope:enrollment:db-account",
+      })
+    );
+  });
+
+  it("returns only bounded candidates for the exact dual-capability login credential", async () => {
+    mocks.findByCredentialId.mockResolvedValue({
+      id: "db-dual",
+      userId: USER_ID,
+      credentialId: "dual-credential",
+      vaultUnlockEnabled: true,
+    });
+    mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue([
+      {
+        id: "variant-2",
+        encryptedVaultKey: encryptedPayload("vault_key", USER_ID),
+        publicMetadata: { source: "registration" },
+      },
+    ]);
+
+    const result = await passkeyVaultEnvelopeService.getCandidatesAfterAccountPasskeyLogin(
+      USER_ID,
+      "dual-credential",
+      "variant-2"
+    );
+
+    expect(mocks.findActivePasskeyEnvelopeVariants).toHaveBeenCalledWith(
+      USER_ID,
+      "db-dual",
+      "dual-credential",
+      "variant-2"
+    );
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      envelopeVariantId: "variant-2",
+      credentialId: "dual-credential",
+      envelope: { method: "passkey_prf", kdfMetadata: null },
+    });
+    expect(mocks.storeChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "selahkeep:vault:binding:db-dual" })
+    );
+  });
+
+  it("fails closed when login candidate storage exceeds the package bound", async () => {
+    mocks.findByCredentialId.mockResolvedValue({
+      id: "db-dual",
+      userId: USER_ID,
+      credentialId: "dual-credential",
+      vaultUnlockEnabled: true,
+    });
+    mocks.findActivePasskeyEnvelopeVariants.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `variant-${index}`,
+        encryptedVaultKey: encryptedPayload("vault_key", USER_ID),
+      }))
+    );
+
+    await expect(
+      passkeyVaultEnvelopeService.getCandidatesAfterAccountPasskeyLogin(
+        USER_ID,
+        "dual-credential"
+      )
+    ).rejects.toThrow("bounded vault envelope candidate set");
+    expect(mocks.storeChallenge).not.toHaveBeenCalled();
   });
 });

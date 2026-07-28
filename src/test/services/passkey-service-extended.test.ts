@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   storeChallenge: vi.fn(),
   consumeValidChallenge: vi.fn(),
   findByCredentialId: vi.fn(),
-  updateCounter: vi.fn(),
+  advanceCounter: vi.fn(),
   findActiveEnvelopeByMethod: vi.fn(),
   record: vi.fn(),
   generateAuthenticationOptions: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock("@/server/repositories/passkey-repository", () => ({
     storeChallenge: mocks.storeChallenge,
     consumeValidChallenge: mocks.consumeValidChallenge,
     findByCredentialId: mocks.findByCredentialId,
-    updateCounter: mocks.updateCounter,
+    advanceCounter: mocks.advanceCounter,
     createCredential: vi.fn(),
   },
 }));
@@ -64,6 +64,7 @@ describe("passkey service extended", () => {
     vi.clearAllMocks();
     mocks.generateAuthenticationOptions.mockResolvedValue({ challenge: "auth-challenge" });
     mocks.findByUserId.mockResolvedValue([{ credentialId: "cred-id", transports: ["internal"] }]);
+    mocks.advanceCounter.mockResolvedValue("advanced");
   });
 
   it("rate limits authentication options", async () => {
@@ -79,7 +80,10 @@ describe("passkey service extended", () => {
     const options = await passkeyService.getAuthenticationOptions();
     expect(options.challenge).toBe("auth-challenge");
     expect(mocks.storeChallenge).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: undefined, type: "authentication" })
+      expect.objectContaining({
+        userId: undefined,
+        type: "selahkeep:passkey:authentication",
+      })
     );
   });
 

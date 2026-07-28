@@ -2,7 +2,12 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
-import { prepareWebAuthnPrfExtensions } from "@tgoliveira/vault-core/browser";
+import {
+  prepareVaultPasskeyPrfRegistrationOptions,
+  prepareWebAuthnPrfExtensions,
+  type PublicKeyCredentialCreationOptionsInput,
+} from "@tgoliveira/vault-core/browser";
+import { SELAHKEEP_PRF_SALT_PREFIX } from "@/modules/vault/selahkeep-profile";
 
 export { alignPrfExtensionsForCredential as alignPrfExtensionsForAllowCredentials } from "@tgoliveira/vault-core/browser";
 
@@ -23,6 +28,18 @@ export function prepareRegistrationOptions(
       options.extensions as PrfExtensionInput
     ) as PublicKeyCredentialCreationOptionsJSON["extensions"],
   };
+}
+
+/** SimpleWebAuthn keeps JSON fields encoded and passes the core-prepared PRF extension through. */
+export async function prepareVaultRegistrationOptions(
+  options: PublicKeyCredentialCreationOptionsJSON,
+  userId: string
+): Promise<PublicKeyCredentialCreationOptionsJSON> {
+  return prepareVaultPasskeyPrfRegistrationOptions({
+    userId,
+    prfSaltPrefix: SELAHKEEP_PRF_SALT_PREFIX,
+    serverOptions: options as unknown as PublicKeyCredentialCreationOptionsInput,
+  }) as unknown as PublicKeyCredentialCreationOptionsJSON;
 }
 
 export function prepareAuthenticationOptions(

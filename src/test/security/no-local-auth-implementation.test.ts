@@ -74,15 +74,15 @@ describe("no local auth implementation guard", () => {
     }
   });
 
-  it("pins @tgoliveira/secure-auth to 0.7.0", () => {
+  it("pins @tgoliveira/secure-auth to 0.8.0", () => {
     const packageJson = JSON.parse(readSource("package.json")) as {
       dependencies: Record<string, string>;
     };
-    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("0.7.0");
+    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("0.8.0");
 
     const lockfile = readSource("package-lock.json");
-    expect(lockfile).toContain('"@tgoliveira/secure-auth": "0.7.0"');
-    expect(lockfile).toContain("secure-auth-0.7.0.tgz");
+    expect(lockfile).toContain('"@tgoliveira/secure-auth": "0.8.0"');
+    expect(lockfile).toContain("secure-auth-0.8.0.tgz");
   });
 
   it("delegates account auth API routes to @tgoliveira/secure-auth", () => {
