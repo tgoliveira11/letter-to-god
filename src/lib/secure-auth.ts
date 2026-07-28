@@ -11,6 +11,7 @@ import { readEnv } from "@/lib/env/parse";
 import { ACCOUNT_PASSWORD_VAULT_NOTE } from "@/lib/account-auth-messages";
 import { PRODUCT_NAME } from "@/lib/marketing/brand";
 import { ensureBootstrapEmailAdminRole } from "@/lib/secure-auth-admin-bootstrap";
+import { getVaultPasskeyLoginAuthenticationExtensions } from "@/server/services/passkey-login-vault-extension-service";
 
 type RouteHandler = (request: Request, ...args: unknown[]) => Promise<Response>;
 
@@ -130,6 +131,10 @@ function initSecureAuth(): SecureAuthInstance {
   const secureAuthCore = createSecureAuth({
     db: secureAuthDb,
     ...envConfig,
+    webauthn: {
+      ...envConfig.webauthn,
+      getLoginAuthenticationExtensions: getVaultPasskeyLoginAuthenticationExtensions,
+    },
     accountPolicy: {
       sendVerificationOnRegister: envConfig.accountPolicy!.sendVerificationOnRegister,
       requireEmailVerificationForAccountApis:

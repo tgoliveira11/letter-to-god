@@ -1,6 +1,7 @@
 # Auth reset to `@tgoliveira/secure-auth`
 
-Branch: `main` (Phase 0 complete) · **Current pin:** `0.8.0` (see `package.json`)
+Branch: `main` (Phase 0 complete) · **Current published pin:** `0.8.0` (see `package.json`) ·
+**Prepared target:** `0.9.0` after publication
 
 ## Goal
 
@@ -60,6 +61,12 @@ Package owns: login, register, OAuth, account passkey sign-in, 2FA, password flo
 ### TODO_SECURITY_REVIEW_REQUIRED
 
 - Optional account-login vault unlock is fail-open for account authentication, runs only after the final session, and keeps PRF output browser-only.
+- The login-options route stays a pure package delegate. A server-only package callback adds the
+  vault-core-built public PRF input only for an eligible credential in secure-auth's resolved
+  allow-list.
+- `action_required` is an authenticated post-login outcome: PRF absence or candidate `no_match`
+  redirects to explicit vault unlock; it never converts successful account authentication into a
+  login failure.
 - Shared `passkey_credentials` table: package writes sign-in credentials; product writes vault flags/envelopes. Migration `0023` provides the shared counter revision required by both verification paths.
 
 ## Database

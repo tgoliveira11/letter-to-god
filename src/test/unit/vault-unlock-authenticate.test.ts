@@ -8,7 +8,7 @@ import {
   verifyVaultUnlockAuthentication,
   VAULT_UNLOCK_AUTHENTICATE_PURPOSE,
 } from "@/lib/passkey/vault-unlock-authenticate";
-import { passkeyPrfSaltBase64Url } from "@/lib/passkey/prf";
+import { passkeyPrfExtensions } from "@/lib/passkey/prf";
 import { PASSKEY_NOT_AVAILABLE_FOR_VAULT_UNLOCK_MESSAGE } from "@/lib/passkey/messages";
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +27,13 @@ vi.mock("@simplewebauthn/browser", () => ({
 }));
 
 describe("vault unlock authenticate client", () => {
+  async function passkeyPrfSaltBase64Url(userId: string): Promise<string> {
+    const extensions = (await passkeyPrfExtensions(userId)) as {
+      prf?: { eval?: { first?: string } };
+    };
+    return extensions.prf?.eval?.first ?? "";
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.apiPost.mockResolvedValue({
@@ -66,9 +73,9 @@ describe("vault unlock authenticate client", () => {
     ]);
   });
 
-  it("aligns PRF evalByCredential to eval when scoped to one vault credential", () => {
+  it("aligns PRF evalByCredential to eval when scoped to one vault credential", async () => {
     const userId = "550e8400-e29b-41d4-a716-446655440000";
-    const salt = passkeyPrfSaltBase64Url(userId);
+    const salt = await passkeyPrfSaltBase64Url(userId);
     const filtered = filterAuthenticationOptionsForCredential(
       {
         challenge: "abc",
@@ -91,9 +98,9 @@ describe("vault unlock authenticate client", () => {
     expect(filtered.extensions?.prf?.evalByCredential).toBeUndefined();
   });
 
-  it("prepareVaultUnlockAuthenticationOptions converts aligned PRF salts to ArrayBuffer", () => {
+  it("prepareVaultUnlockAuthenticationOptions converts aligned PRF salts to ArrayBuffer", async () => {
     const userId = "550e8400-e29b-41d4-a716-446655440000";
-    const salt = passkeyPrfSaltBase64Url(userId);
+    const salt = await passkeyPrfSaltBase64Url(userId);
     const prepared = prepareVaultUnlockAuthenticationOptions(
       {
         challenge: "abc",

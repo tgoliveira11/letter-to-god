@@ -6,14 +6,21 @@ import {
   prepareWebAuthnExtensions,
   alignPrfExtensionsForAllowCredentials,
 } from "@/lib/passkey/prepare-webauthn-options";
-import { passkeyPrfSaltBase64Url } from "@/lib/passkey/prf";
+import { passkeyPrfExtensions } from "@/lib/passkey/prf";
 import { bytesToBase64Url } from "@/lib/crypto-client/encoding";
 
 describe("prepareWebAuthnExtensions", () => {
   const userId = "550e8400-e29b-41d4-a716-446655440000";
 
-  it("converts PRF eval.first from base64url to ArrayBuffer", () => {
-    const salt = passkeyPrfSaltBase64Url(userId);
+  async function passkeyPrfSaltBase64Url(): Promise<string> {
+    const extensions = (await passkeyPrfExtensions(userId)) as {
+      prf?: { eval?: { first?: string } };
+    };
+    return extensions.prf?.eval?.first ?? "";
+  }
+
+  it("converts PRF eval.first from base64url to ArrayBuffer", async () => {
+    const salt = await passkeyPrfSaltBase64Url();
     const prepared = prepareRegistrationOptions({
       challenge: "abc",
       extensions: {
@@ -42,8 +49,8 @@ describe("prepareWebAuthnExtensions", () => {
     expect(prepared.extensions?.prf?.eval?.second).toBeInstanceOf(ArrayBuffer);
   });
 
-  it("converts PRF evalByCredential salts", () => {
-    const salt = passkeyPrfSaltBase64Url(userId);
+  it("converts PRF evalByCredential salts", async () => {
+    const salt = await passkeyPrfSaltBase64Url();
     const prepared = prepareWebAuthnExtensions({
       prf: {
         evalByCredential: {
@@ -72,8 +79,8 @@ describe("prepareWebAuthnExtensions", () => {
     expect(prepareRegistrationOptions(options)).toEqual(options);
   });
 
-  it("prepareAuthenticationOptions converts PRF extensions", () => {
-    const salt = passkeyPrfSaltBase64Url(userId);
+  it("prepareAuthenticationOptions converts PRF extensions", async () => {
+    const salt = await passkeyPrfSaltBase64Url();
     const prepared = prepareAuthenticationOptions({
       challenge: "abc",
       extensions: { prf: { eval: { first: salt } } },
@@ -81,8 +88,8 @@ describe("prepareWebAuthnExtensions", () => {
     expect(prepared.extensions?.prf?.eval?.first).toBeInstanceOf(ArrayBuffer);
   });
 
-  it("aligns evalByCredential to eval when allowCredentials is scoped to one passkey", () => {
-    const salt = passkeyPrfSaltBase64Url(userId);
+  it("aligns evalByCredential to eval when allowCredentials is scoped to one passkey", async () => {
+    const salt = await passkeyPrfSaltBase64Url();
     const aligned = alignPrfExtensionsForAllowCredentials({
       challenge: "abc",
       allowCredentials: [{ id: "vault-cred", type: "public-key", transports: ["internal"] }],
@@ -99,8 +106,8 @@ describe("prepareWebAuthnExtensions", () => {
     expect(aligned.extensions?.prf?.evalByCredential).toBeUndefined();
   });
 
-  it("aligns evalByCredential to eval when forceCredentialId is provided", () => {
-    const salt = passkeyPrfSaltBase64Url(userId);
+  it("aligns evalByCredential to eval when forceCredentialId is provided", async () => {
+    const salt = await passkeyPrfSaltBase64Url();
     const aligned = alignPrfExtensionsForAllowCredentials(
       {
         challenge: "abc",

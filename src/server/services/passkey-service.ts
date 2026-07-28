@@ -139,7 +139,7 @@ async function buildVaultUnlockAuthenticationOptions(
       toAllowCredentialDescriptor(credential)
     ),
     userVerification: "required",
-    extensions: passkeyPrfExtensions(userId),
+    extensions: await passkeyPrfExtensions(userId),
   });
 
   await passkeyRepository.storeChallenge({
@@ -191,7 +191,7 @@ export const passkeyService = {
             residentKey: "preferred",
             userVerification: "preferred",
           },
-      extensions: passkeyPrfExtensions(userId),
+      extensions: await passkeyPrfExtensions(userId),
     });
 
     await passkeyRepository.storeChallenge({
@@ -319,7 +319,7 @@ export const passkeyService = {
       userId && credentials.length > 0
         ? credentials.map((credential) => toAllowCredentialDescriptor(credential))
         : undefined;
-    const extensions = userId ? passkeyPrfExtensions(userId) : undefined;
+    const extensions = userId ? await passkeyPrfExtensions(userId) : undefined;
 
     const options = await generateAuthenticationOptions({
       rpID,

@@ -21,14 +21,14 @@ function readJson(relativePath: string): { dependencies?: Record<string, string>
 }
 
 describe("@tgoliveira/vault-core dependency", () => {
-  it("package.json pins 1.6.1", () => {
-    expect(readJson("package.json").dependencies?.["@tgoliveira/vault-core"]).toBe("1.6.1");
+  it("package.json pins 1.7.0", () => {
+    expect(readJson("package.json").dependencies?.["@tgoliveira/vault-core"]).toBe("1.7.0");
   });
 
-  it("lockfile resolves 1.6.1", () => {
+  it("lockfile resolves 1.7.0", () => {
     const lock = readFileSync(join(ROOT, "package-lock.json"), "utf8");
-    expect(lock).toContain('"@tgoliveira/vault-core": "1.6.1"');
-    expect(lock).toMatch(/"node_modules\/@tgoliveira\/vault-core":\s*\{[^}]*"version":\s*"1\.6\.1"/);
+    expect(lock).toContain('"@tgoliveira/vault-core": "1.7.0"');
+    expect(lock).toMatch(/"node_modules\/@tgoliveira\/vault-core":\s*\{[^}]*"version":\s*"1\.7\.0"/);
   });
 
   it("unlockWithPasswordEnvelope accepts scope and profile", async () => {

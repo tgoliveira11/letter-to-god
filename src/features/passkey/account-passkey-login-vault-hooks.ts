@@ -4,17 +4,27 @@ import type { PasskeyLoginHooks } from "@tgoliveira/secure-auth/react/client";
 import type { VaultPasskeyEnvelopeVariant } from "@tgoliveira/vault-core";
 import { assertVaultSessionOperationCurrent } from "@tgoliveira/vault-core/browser";
 import { apiClient } from "@/lib/api-client/client";
+import { ApiError } from "@/lib/api-client/api-error";
 import {
   extractPasskeyPrfOutput,
   unlockVaultFromPasskeyEnvelopeCandidates,
 } from "@/lib/crypto-client/passkey-vault";
 import { resolvePasskeyPrfCapability } from "@/lib/crypto-client/vault-passkey-browser";
 import { prepareAuthenticationOptions } from "@/lib/passkey/prepare-webauthn-options";
-import {
-  persistVaultPasskeyBinding,
-} from "@/lib/passkey/vault-unlock-authenticate";
+import { persistVaultPasskeyBinding } from "@/lib/passkey/vault-unlock-authenticate";
 import { currentDeviceLabel } from "@/lib/passkey/device-label";
 import { beginVaultOwnerOperation } from "@/lib/crypto-client/vault-session";
+
+const VAULT_UNLOCK_REDIRECT = "/vault/unlock";
+
+function vaultActionRequired(code: "vault_prf_unavailable" | "vault_envelope_no_match") {
+  return {
+    status: "action_required" as const,
+    code,
+    redirectTo: VAULT_UNLOCK_REDIRECT,
+    message: "Your account is signed in. Unlock your vault to continue.",
+  };
+}
 
 /**
  * Optional composition: account login remains successful when vault PRF is absent or cannot
@@ -30,15 +40,22 @@ export const accountPasskeyLoginVaultHooks: PasskeyLoginHooks = {
       clientExtensionResults: results,
     });
     const prfOutput = extractPasskeyPrfOutput(results, verifiedCredentialId);
-    if (capability.state !== "confirmed_authentication" || !prfOutput) return;
-
     try {
-      const verified = await apiClient.post<{
+      let verified: {
         userId: string;
         verifiedCredentialId: string;
         bindingProof: string;
         candidates: VaultPasskeyEnvelopeVariant[];
-      }>("/api/passkeys/account-login-vault-candidates", { verifiedCredentialId });
+      };
+      try {
+        verified = await apiClient.post("/api/passkeys/account-login-vault-candidates", {
+          verifiedCredentialId,
+        });
+      } catch (error) {
+        // A sign-in-only credential has no vault integration to complete.
+        if (error instanceof ApiError && error.status === 404) return { status: "completed" };
+        throw error;
+      }
       if (verified.verifiedCredentialId !== verifiedCredentialId) {
         throw new Error("Verified account and vault credential mismatch.");
       }
@@ -52,7 +69,19 @@ export const accountPasskeyLoginVaultHooks: PasskeyLoginHooks = {
         operation,
       });
       assertVaultSessionOperationCurrent(operation);
-      if (match.status !== "matched") return;
+      if (
+        capability.state !== "confirmed_authentication" ||
+        !prfOutput ||
+        match.status === "prf_unavailable"
+      ) {
+        return vaultActionRequired("vault_prf_unavailable");
+      }
+      if (match.status === "no_match") {
+        return vaultActionRequired("vault_envelope_no_match");
+      }
+      if (match.status !== "matched") {
+        throw new Error("Vault passkey bootstrap candidate validation failed.");
+      }
 
       try {
         await persistVaultPasskeyBinding({
@@ -65,8 +94,9 @@ export const accountPasskeyLoginVaultHooks: PasskeyLoginHooks = {
       } catch {
         // Login and local unlock remain valid; the opaque routing hint can be retried later.
       }
+      return { status: "completed" };
     } finally {
-      prfOutput.fill(0);
+      prfOutput?.fill(0);
     }
   },
 };

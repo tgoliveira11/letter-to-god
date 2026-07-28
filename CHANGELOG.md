@@ -19,10 +19,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **Dependency baseline.** Adopted `@tgoliveira/vault-core@1.6.1` and retained `@tgoliveira/secure-auth@0.8.0`.
+- **Dependency baseline.** The source integration is prepared for `@tgoliveira/vault-core@1.7.0`
+  and `@tgoliveira/secure-auth@0.9.0`; package manifests remain pinned to the latest published
+  `1.6.1` / `0.8.0` pair until both releases are available.
 - **Authentication-confirmed passkey enrollment.** Registration detects capability only. Vault-only setup, recovery setup, and optional account-passkey composition now require one exact, user-mediated authentication ceremony before the first durable envelope is wrapped or persisted.
 - **Guided synced-passkey repair.** A candidate `no_match` leads directly to compatibility confirmation for the same logical credential. The user supplies an independent vault password or recovery phrase locally before one explicit WebAuthn prompt; known-good variants remain append-only.
 - **Explicit vs quick unlock.** Full unlock always uses the active credential allow-list, while dock quick unlock remains an exact browser-binding optimization.
+- **First-login vault bootstrap.** secure-auth now composes the package-built public PRF input on the
+  first email-scoped account passkey ceremony for eligible dual-capability credentials. After the
+  final account session, a browser-local hook unwraps exact encrypted candidates or redirects to
+  explicit vault unlock with a typed action when PRF is unavailable or no variant matches.
 
 ### Security
 
@@ -30,7 +36,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Independent compatibility repair.** Synced-passkey `no_match` repair requires a local vault password or recovery phrase through vault-core 1.6.1, even while the vault is locked; it cannot rely on a session UVK or browser binding alone.
 - **Registration PRF is non-authoritative.** Registration responses and account-registration routes no longer issue a persistence receipt. Only a sanitized, server-verified assertion for the exact credential can mint the single-use proof consumed by envelope persistence. New variants carry `publicMetadata.prfCeremony = "authentication"`; legacy variants remain readable and are flagged for guided confirmation.
 - **Browser-only PRF interop.** secure-auth owns account assertion sanitization, verification, and counter updates. SelahKeep receives only the verified credential ID after the final session and keeps PRF bytes exclusively in browser memory.
+- **No custom login-options mutation.** The account passkey options route is a pure secure-auth
+  delegate. Its server-only extension callback receives the resolved user and allow-list and uses
+  vault-core to derive only the public per-user salt; it never exposes the user ID or PRF output.
 - **Emergency mode off.** The vault-core emergency/duress UI gate is explicitly disabled in SelahKeep; no emergency state or controls are exposed.
+
+### Fixed
+
+- **Explicit passkey unlock on Safari/PWA.** The full unlock page now consumes already-prefetched WebAuthn options directly inside the user click instead of refreshing them first. Browser-binding-free explicit unlock therefore preserves transient user activation while quick unlock remains binding-scoped.
 
 ## [0.3.4] - 2026-07-27
 
