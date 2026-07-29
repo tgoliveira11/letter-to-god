@@ -34,22 +34,28 @@ export default function VaultUnlockPage() {
     loading,
     error,
     unlockFromPasskey,
+    unlockFromPortablePasskey,
     unlockFromRecoveryCode,
     unlockFromVaultPassword,
     unlockFromRecoveryPhrase,
   } = useVault();
   const serverStatusForPasskey = vaultClient.status === "ready" ? vaultClient.serverStatus : null;
   const hasPasskeyPrfEnvelope = Boolean(
-    serverStatusForPasskey?.availableUnlockMethods?.passkey ?? serverStatusForPasskey?.hasPasskey
+    !serverStatusForPasskey?.hasPortablePasskey &&
+      (serverStatusForPasskey?.availableUnlockMethods?.passkey ?? serverStatusForPasskey?.hasPasskey)
+  );
+  const hasPortablePasskey = Boolean(
+    serverStatusForPasskey?.availableUnlockMethods?.portablePasskey ??
+      serverStatusForPasskey?.hasPortablePasskey
   );
   const explicitPasskeyPlan = resolvePasskeyUnlockPlan({
     intent: "explicit",
     hasPasskeyPrfEnvelope,
     preliminaryPrfAvailable: capabilities.passkeyPrf.status === "supported",
   });
-  const explicitPasskeyReady = explicitPasskeyPlan.status === "ready";
+  const explicitPasskeyReady = hasPortablePasskey || explicitPasskeyPlan.status === "ready";
   const { prefetch, refresh } = useVaultPasskeyUnlockPrefetch(
-    Boolean(application.ownerId) && explicitPasskeyReady,
+    Boolean(application.ownerId) && !hasPortablePasskey && explicitPasskeyReady,
     "explicit"
   );
   const rateLimitScopeKey = application.ownerId ?? "vault";
@@ -70,7 +76,7 @@ export default function VaultUnlockPage() {
   if (
     !application.ownerId ||
     vaultClient.status === "loading" ||
-    capabilities.passkeyPrf.status === "checking"
+    (!hasPortablePasskey && capabilities.passkeyPrf.status === "checking")
   ) {
     return (
       <PageLayout width="narrow">
@@ -113,7 +119,9 @@ export default function VaultUnlockPage() {
           loading={loading}
           error={error}
           serverStatus={snapshot}
-          prfSupported={capabilities.passkeyPrf.status === "supported"}
+          prfSupported={
+            hasPortablePasskey || capabilities.passkeyPrf.status === "supported"
+          }
           passkeyReady={explicitPasskeyReady}
           unlockRateLimiter={rateLimiter}
           rateLimitScopeKey={rateLimitScopeKey}
@@ -128,6 +136,11 @@ export default function VaultUnlockPage() {
           onUnlockPasskey={
             explicitPasskeyReady
               ? async () => {
+                  if (hasPortablePasskey) {
+                    await unlockFromPortablePasskey();
+                    router.push(afterUnlockPath);
+                    return;
+                  }
                   // Preserve Safari/PWA transient user activation: when mount-time options are
                   // ready, start WebAuthn immediately instead of inserting a network refresh.
                   const latest = prefetch?.options ? prefetch : await refresh();

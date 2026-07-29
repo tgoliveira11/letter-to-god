@@ -10,7 +10,13 @@ export type ApplicationState = {
   vaultStatus: VaultStatus | null | "unavailable";
   vaultAutoLockUserMinutes: number | null | "unavailable";
   adminAccess: boolean;
-  features: { preferences: boolean };
+  features: {
+    preferences: boolean;
+    portableVaultBroker: {
+      enabled: boolean;
+      brokerUrl: string;
+    };
+  };
 };
 
 const ApplicationStateContext = createContext<ApplicationState | null>(null);

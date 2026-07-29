@@ -8,10 +8,10 @@ export type VaultPasskeyAvailabilityCopy = {
 };
 
 export const VAULT_PASSKEY_SECTION_INTRO =
-  "Use a compatible passkey to unlock your vault after you sign in. This is separate from account passkey sign-in and requires WebAuthn PRF support from your browser and passkey provider.";
+  "Use one synced account passkey to authorize portable vault unlock after you sign in. Login and vault unlock remain separate security actions; password and recovery phrase stay available.";
 
 export const VAULT_PASSKEY_INDEPENDENCE_NOTE =
-  "Account passkeys and vault passkeys are independent. You can use either one without the other.";
+  "Account authentication and vault unlock are independent security actions. The same eligible passkey may authorize both, but neither action unlocks the other.";
 
 export function getVaultPasskeyAvailabilityCopy(
   availability: VaultPasskeyAvailability

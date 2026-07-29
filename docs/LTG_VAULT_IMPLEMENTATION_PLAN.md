@@ -2,6 +2,11 @@
 
 > Former working name: LTG Vault. Current product name: SelahKeep.
 
+> **Historical plan:** This document is retained for delivery traceability. Its PRF passkey phases,
+> route names, package versions, and “current decision” statements are superseded by
+> [`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md). New passkey enrollment must use the
+> direct portable broker flow; PRF code exists only for pre-cutover compatibility reads.
+
 **Status:** Phases 0–5 **complete** (historical planning tables retained below for traceability)  
 **Priority Track 1** (Security, Recovery, and Trust): **mostly complete** — `/vault/security` shipped 2026-06-16  
 **Priority Track 2** (Writing Experience and Editor Quality): **mostly complete** — visual editor, drafts, templates, quick insert, focus mode, daily note shipped 2026-06-16  
@@ -512,7 +517,9 @@ Categories (one per note), tags (many per note), answered status in encrypted me
 
 ### 1. Goal
 
-Complete passkey vault unlock for MVP: associate passkey with vault and create a PRF-based envelope. Current product decision (2026-06-19): account passkey login and vault unlock are separate explicit actions; the earlier auto-unlock design below is superseded.
+Historical Phase 4 implementation: associate a passkey with the vault through a PRF-based envelope.
+This phase was superseded by the portable broker decision documented at the top of this file.
+The still-current invariant is that account passkey login and vault unlock are separate explicit actions.
 
 ### 2. Scope
 
@@ -837,7 +844,7 @@ The event log never includes note content, decrypted metadata, PRF output, recov
 Explains:
 
 - account passkey login is different from vault passkey unlock;
-- vault passkey unlock requires WebAuthn PRF;
+- legacy pre-cutover vault passkey unlock requires WebAuthn PRF;
 - some browsers/providers may support passkeys but not PRF;
 - vault password and recovery phrase remain fallback methods.
 
@@ -1375,9 +1382,9 @@ Phase 0 ──► Phase 1 (crypto + vault setup)
 | [`docs/TDR_LTG_Vault_MVP.md`](./TDR_LTG_Vault_MVP.md) | Product/architecture source of truth |
 | [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./AUTH_RESET_TO_SECURE_AUTH.md) | Phase 0 auth boundary |
 | [`docs/ADR-005_*`](./ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md) | Active vault crypto |
-| [`docs/ADR-006_*`](./archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md) | Active passkey PRF unlock |
+| [`docs/ADR-006_*`](./archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md) | Superseded legacy PRF design |
 | [`docs/ADR-005_*`](./ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md) | Active vault crypto ADR |
-| [`docs/ADR-006_*`](./archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md) | Active passkey PRF ADR |
+| [`docs/ADR-006_*`](./archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md) | Superseded legacy PRF ADR |
 | [`docs/README.md`](./README.md) | Documentation index |
 | `AGENTS.md` | Agent workflow + test thresholds |
 

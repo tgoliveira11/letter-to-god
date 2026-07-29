@@ -169,6 +169,13 @@
       "when": 1785272400000,
       "tag": "0023_secure_auth_passkey_counter_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785341040000,
+      "tag": "0024_portable_vault_broker",
+      "breakpoints": true
     }
   ]
 }

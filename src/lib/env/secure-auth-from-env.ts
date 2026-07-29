@@ -10,6 +10,7 @@ import {
 } from "@/lib/env/parse";
 import { resolveRateLimitStore } from "@/lib/env/rate-limit-store";
 import { resolveWebAuthnSettings } from "@/lib/env/webauthn-from-env";
+import { resolvePortableVaultGrantConfig } from "@/lib/env/portable-vault-broker";
 
 export type SecureAuthEnvSlice = Pick<
   SecureAuthConfig,
@@ -481,6 +482,7 @@ export function buildSecureAuthConfigFromEnv(
         rpId: webauthn.rpId,
         rpName: webauthn.rpName,
         origin: webauthn.origin,
+        portableVaultGrants: resolvePortableVaultGrantConfig(env, baseUrl),
       };
     })(),
     ui: {

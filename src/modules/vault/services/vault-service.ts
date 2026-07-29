@@ -17,6 +17,8 @@ import { enforceRateLimit, RateLimitError } from "@/server/policies/rate-limit";
 import { deriveSetupPhase } from "@/lib/vault/vault-status";
 import { resolvePasskeyUnlockAvailableOnThisDevice } from "@/server/services/vault-passkey-device-binding-service";
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
+import { resolvePortableVaultBrokerPublicConfig } from "@/lib/env/portable-vault-broker";
+import { portableVaultBrokerRepository } from "@/server/repositories/portable-vault-broker-repository";
 
 export const vaultService = {
   async setup(userId: string, input: VaultSetupInput) {
@@ -125,6 +127,10 @@ export const vaultService = {
     });
 
     const setupComplete = setupPhase === "complete";
+    const portablePasskeys = resolvePortableVaultBrokerPublicConfig().enabled
+      ? await portableVaultBrokerRepository.listCurrentForUser(userId)
+      : [];
+    const hasPortablePasskey = portablePasskeys.some((mapping) => mapping.state === "active");
 
     const activeRecoveryPhrase = methods.has("recovery_phrase")
       ? await vaultRepository.findActiveEnvelopeByMethod(userId, "recovery_phrase")
@@ -157,6 +163,7 @@ export const vaultService = {
       const durableMethods = ["recovery_code", "recovery_phrase", "passkey_authorized_device"].filter(
         (m) => methods.has(m)
       );
+      if (hasPortablePasskey) durableMethods.push("portable_passkey");
 
       if (ltgSetupComplete || (durableMethods.length >= 1 && methods.size >= 2)) {
         recoveryState = "Protected";
@@ -185,7 +192,8 @@ export const vaultService = {
       hasRecoveryCode: methods.has("recovery_code"),
       hasRecoveryPhrase: methods.has("recovery_phrase"),
       hasVaultPassword: methods.has("password"),
-      hasPasskey: methods.has("passkey_authorized_device"),
+      hasPasskey: hasPortablePasskey || methods.has("passkey_authorized_device"),
+      hasPortablePasskey,
       ltgSetupComplete,
       recoveryPhrase: recoveryPhraseMeta,
       passkeyUnlockAvailableOnThisDevice,
@@ -193,7 +201,8 @@ export const vaultService = {
         ? {
             password: methods.has("password"),
             recoveryPhrase: methods.has("recovery_phrase"),
-            passkey: methods.has("passkey_authorized_device"),
+            passkey: hasPortablePasskey || methods.has("passkey_authorized_device"),
+            portablePasskey: hasPortablePasskey,
           }
         : undefined,
     };

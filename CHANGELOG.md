@@ -15,13 +15,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Portable passkey vault unlock.** SelahKeep now integrates `vault-core` 1.8.0, the trusted
+  vault broker v1 protocol, and `secure-auth` 0.10.0 single-use ES256 grants/receipts so one synced
+  account passkey can authorize vault unlock across browsers without relying on portable PRF output.
+- **Audited passkey cutover tooling.** Migration `0024_portable_vault_broker.sql` adds broker
+  operations, pending/active portable mappings, and cleanup epochs. `npm run passkeys:cleanup`
+  supports count-pinned dry-run, execution, and explicit reopening without targeting post-cutover
+  credentials.
 - **Unified account/vault passkeys.** An explicitly opted-in account passkey can serve both account sign-in and vault unlock after an exact post-registration authentication confirmation. An already dual-capability passkey can open the vault locally after secure-auth finishes the account session. Account auth and vault access remain independently usable.
 
 ### Changed
 
-- **Dependency baseline.** The application pins the published `@tgoliveira/vault-core@1.7.0`
-  and `@tgoliveira/secure-auth@0.9.1` releases. The secure-auth patch reports its package version
-  accurately through the delegated health endpoint.
+- **Dependency baseline.** The application pins published `@tgoliveira/vault-core@1.8.0` and
+  `@tgoliveira/secure-auth@0.10.0` releases.
+- **Passkey UX boundary.** Account settings manages account login credentials only. Vault settings
+  explicitly enrolls, tests, and revokes portable vault access. Login never installs a vault key.
 - **Authentication-confirmed passkey enrollment.** Registration detects capability only. Vault-only setup, recovery setup, and optional account-passkey composition now require one exact, user-mediated authentication ceremony before the first durable envelope is wrapped or persisted.
 - **Guided synced-passkey repair.** A candidate `no_match` leads directly to compatibility confirmation for the same logical credential. The user supplies an independent vault password or recovery phrase locally before one explicit WebAuthn prompt; known-good variants remain append-only.
 - **Explicit vs quick unlock.** Full unlock always uses the active credential allow-list, while dock quick unlock remains an exact browser-binding optimization.
@@ -32,6 +40,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- **Receipt-before-session invariant.** The browser installs a non-extractable UVK only after the
+  app server verifies and consumes the broker completion receipt. PUKs, grants, receipts, PRF
+  output, private ephemeral keys, UVKs, and decrypted data are never sent to an app API or stored.
+- **Legacy enrollment closed during portable rollout.** New PRF envelope enrollment is disabled by
+  default whenever the portable broker is enabled; existing PRF envelopes remain available only as
+  a dual-run compatibility path until the count-pinned cutover cleanup is executed.
 - **Shared WebAuthn counter CAS.** Migration `0023_secure_auth_passkey_counter_revision.sql` adds revisioned compare-and-set updates, including counterless authenticators, across secure-auth and product vault verification.
 - **Independent compatibility repair.** Synced-passkey `no_match` repair requires a local vault password or recovery phrase through vault-core 1.6.1, even while the vault is locked; it cannot rely on a session UVK or browser binding alone.
 - **Registration PRF is non-authoritative.** Registration responses and account-registration routes no longer issue a persistence receipt. Only a sanitized, server-verified assertion for the exact credential can mint the single-use proof consumed by envelope persistence. New variants carry `publicMetadata.prfCeremony = "authentication"`; legacy variants remain readable and are flagged for guided confirmation.

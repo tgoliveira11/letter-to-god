@@ -2,7 +2,7 @@
 
 Living inventory of what the app exposes **today**. Update this file when routes, APIs, jobs, integrations, or shipped/planned status changes.
 
-**Last reviewed:** 2026-07-28 · **Version in repo:** see `package.json`
+**Last reviewed:** 2026-07-29 · **Version in repo:** see `package.json`
 
 ---
 
@@ -81,7 +81,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | **Vault admin** | `/api/vault/admin/config` | Runtime vault config overrides (platform admin; requires `vault_admin_config_overrides` table) |
 | **Account** | `/api/account/*` | Profile, sessions, passkeys, 2FA, change password, namespaced preferences |
 | **Vault** | `/api/vault/*` | Setup, status, settings, index, unlock envelopes, recovery phrase, password-envelope KDF upgrade, storage |
-| **Passkeys (vault)** | `/api/passkeys/*` | Vault passkey register/authenticate, browser binding, and scoped bulk reset |
+| **Passkeys (vault)** | `/api/vault/portable-passkey`, `/api/account/passkeys/portable-vault-grants/*` | Portable broker mappings plus secure-auth grant/finalize ceremony; `/api/passkeys/*` remains legacy dual-run only |
 | **Notes** | `/api/notes`, `/api/notes/[id]` | Encrypted CRUD only |
 | **Note versions** | `/api/notes/[id]/versions/*` | Encrypted version history |
 | **Attachments** | `/api/notes/[id]/attachments/*` | Encrypted attachments |
@@ -104,7 +104,8 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | Encrypted local drafts | Shipped | IndexedDB; not server plaintext |
 | Vault auto-lock | Shipped | Client session timer |
 | Deterministic private state | Shipped | Server-seeded account snapshot; owner/lease/resource/generation guards discard stale async results across lock/logout/account replacement |
-| Passkey PRF vault unlock | Shipped | vault-core 1.6.1 authentication-confirmed enrollment, explicit/quick selection, synced-credential candidates, independently authorized guided compatibility repair, and optional secure-auth 0.8.0 sign-in composition |
+| Portable passkey vault unlock | Shipped behind env gate | vault-core 1.8.0 broker envelope + secure-auth 0.10.0 exact-credential grants; direct browser-to-broker flow and receipt-before-session install |
+| Passkey PRF vault unlock | Legacy dual-run | Existing envelopes remain readable until an owner-approved, epoch-scoped cleanup; new enrollment is disabled when portable mode is enabled |
 | Note Kanban generation | Shipped | Deterministic on-device parsing of decrypted note markdown; no LLM/plaintext egress |
 | Note ↔ Kanban bidirectional sync | Shipped | Note-bound boards sync checklist/list structure and card state client-side (debounced); encryption unchanged |
 | MCP AI integrations | Shipped (when `INTEGRATIONS_ENABLED`) | Local MCP server + optional bridge; scoped read/write on shared notes/boards only |

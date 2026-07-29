@@ -15,6 +15,7 @@ import {
   getCurrentVaultSessionLease,
   lockVaultSessionManually,
   registerVaultUnloadGuard,
+  unlockVaultSession,
 } from "@/lib/crypto-client/vault-session";
 import {
   assertVaultSessionLeaseCurrent,
@@ -33,9 +34,10 @@ import { getVaultUnlockRateLimiter } from "@/lib/vault/vault-rate-limit";
 import { envelopeScope } from "@/lib/vault/vault-envelope-scope";
 import { SELAHKEEP_VAULT_PROFILE } from "@/modules/vault/selahkeep-profile";
 import { useApplicationState } from "@/components/application-state-provider";
+import { unlockWithPortablePasskey } from "@/features/passkey/portable-vault-broker";
 
 export function useVault() {
-  const { ownerId: userId } = useApplicationState();
+  const { ownerId: userId, features } = useApplicationState();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const unlockLimiter = getVaultUnlockRateLimiter();
@@ -77,6 +79,49 @@ export function useVault() {
     },
     [unlockLimiter, userId]
   );
+
+  const unlockFromPortablePasskey = useCallback(async () => {
+    if (!userId) throw new Error("Not authenticated");
+    if (!features.portableVaultBroker.enabled) {
+      throw new Error("Portable passkey unlock is not enabled");
+    }
+    const operation = beginVaultOwnerOperation(userId);
+    setLoading(true);
+    setError(null);
+    try {
+      const key = await withVaultUnlockRateLimit(
+        unlockLimiter,
+        userId,
+        "passkey_prf",
+        async () => {
+          const { active } = await vaultApi.listPortablePasskeys();
+          const mapping = active[0];
+          if (!mapping) throw new Error("No portable passkey is configured");
+          const vaultKey = await unlockWithPortablePasskey({
+            mapping,
+            brokerUrl: features.portableVaultBroker.brokerUrl,
+          });
+          if (!isVaultSessionOperationCurrent(operation)) {
+            throw new VaultSessionOperationCancelledError("stale_operation");
+          }
+          await unlockVaultSession(vaultKey, "portable_passkey", operation);
+          return vaultKey;
+        }
+      );
+      const lease = getCurrentVaultSessionLease(userId);
+      if (!lease) throw new VaultSessionOperationCancelledError("stale_operation");
+      assertVaultSessionLeaseCurrent(lease);
+      void recordVaultSecurityEvent("vault_unlocked", { method: "portable_passkey" });
+      return key;
+    } catch (e) {
+      if (!(e instanceof VaultSessionOperationCancelledError)) {
+        setError(e instanceof Error ? e.message : "Portable passkey unlock failed");
+      }
+      throw e;
+    } finally {
+      if (isVaultSessionOperationCurrent(operation)) setLoading(false);
+    }
+  }, [features.portableVaultBroker, unlockLimiter, userId]);
 
   const unlockFromRecoveryCode = useCallback(
     async (recoveryCode: string) => {
@@ -248,6 +293,7 @@ export function useVault() {
     error,
     isUnlocked: hasUnlockedVaultSession(),
     unlockFromPasskey,
+    unlockFromPortablePasskey,
     unlockFromRecoveryCode,
     unlockFromVaultPassword,
     unlockFromRecoveryPhrase,

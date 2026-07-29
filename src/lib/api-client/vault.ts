@@ -7,6 +7,21 @@ export type VaultUnlockMethods = {
   password: boolean;
   recoveryPhrase: boolean;
   passkey: boolean;
+  portablePasskey: boolean;
+};
+
+export type PortableVaultMapping = {
+  id: string;
+  state: "pending" | "active";
+  brokerEnvelopeId: string | null;
+  opaqueScope: { userId: string; resourceId: string };
+  enrollmentRequestId: string | null;
+  createdAt: string;
+  activatedAt: string | null;
+  credentialDbId: string;
+  credentialId: string;
+  friendlyName: string;
+  signInEnabled: boolean;
 };
 
 export type RecoveryPhraseStatus = {
@@ -29,6 +44,7 @@ export interface VaultStatus {
   hasRecoveryPhrase?: boolean;
   hasVaultPassword?: boolean;
   hasPasskey?: boolean;
+  hasPortablePasskey?: boolean;
   passkeyUnlockAvailableOnThisDevice?: boolean;
   ltgSetupComplete?: boolean;
   recoveryPhrase?: RecoveryPhraseStatus;
@@ -112,4 +128,24 @@ export const vaultApi = {
     apiClient.get<{
       events: Array<{ id: string; eventType: string; label: string; createdAt: string }>;
     }>("/api/vault/security-events"),
+
+  listPortablePasskeys: () =>
+    apiClient.get<{
+      mappings: PortableVaultMapping[];
+      active: PortableVaultMapping[];
+      pending: PortableVaultMapping[];
+    }>("/api/vault/portable-passkey"),
+
+  preparePortablePasskey: (payload: {
+    credentialDbId: string;
+    opaqueScope: { userId: string; resourceId: string };
+  }) =>
+    apiClient.post<PortableVaultMapping>("/api/vault/portable-passkey/prepare", payload),
+
+  bindPortablePasskey: (payload: {
+    mappingId: string;
+    brokerEnvelopeId: string;
+    requestId: string;
+  }) =>
+    apiClient.post<{ bound: true }>("/api/vault/portable-passkey/bind", payload),
 };

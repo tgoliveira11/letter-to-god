@@ -30,6 +30,7 @@ const APPROVED_VAULT_CORE_BROWSER_IMPORTS = new Set([
   "src/features/passkey/passkey-vault-unlock-setup.tsx",
   "src/features/passkey/account-passkey-login-vault-hooks.ts",
   "src/features/passkey/account-passkey-security-settings.tsx",
+  "src/features/passkey/portable-vault-broker.ts",
   "src/features/recovery/passkey-setup.tsx",
   "src/features/recovery/use-replace-recovery-phrase.ts",
   "src/features/notes/eager-decrypt-notes.ts",

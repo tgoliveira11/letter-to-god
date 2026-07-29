@@ -9,7 +9,9 @@ const recordSchema = z.object({
   eventType: z.enum(CLIENT_RECORDABLE_VAULT_SECURITY_EVENTS),
   metadata: z
     .object({
-      method: z.enum(["password", "recovery_phrase", "passkey", "passkey_prf"]).optional(),
+      method: z
+        .enum(["password", "recovery_phrase", "passkey", "passkey_prf", "portable_passkey"])
+        .optional(),
     })
     .optional(),
 });

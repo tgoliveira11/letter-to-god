@@ -14,6 +14,7 @@ interface VaultDockQuickUnlockSlotProps {
   error: string | null;
   serverStatus: VaultServerStatusSnapshot;
   passkeyReady: boolean;
+  portablePasskey: boolean;
   unlockRateLimiter: VaultUnlockRateLimiter;
   rateLimitScopeKey: string;
   refreshPasskeyOptions: () => Promise<VaultPasskeyUnlockPrefetch | null>;
@@ -39,6 +40,7 @@ export function VaultDockQuickUnlockSlot({
   error,
   serverStatus,
   passkeyReady,
+  portablePasskey,
   unlockRateLimiter,
   rateLimitScopeKey,
   refreshPasskeyOptions,
@@ -63,6 +65,11 @@ export function VaultDockQuickUnlockSlot({
     setPasskeyOptionsReady(false);
     latestPrefetchRef.current = null;
 
+    if (portablePasskey) {
+      setPasskeyOptionsReady(true);
+      return () => setPasskeyOptionsReady(false);
+    }
+
     void refreshPasskeyOptions().then((prefetch) => {
       if (cancelled) return;
       latestPrefetchRef.current = prefetch;
@@ -74,15 +81,15 @@ export function VaultDockQuickUnlockSlot({
       setPasskeyOptionsReady(false);
       latestPrefetchRef.current = null;
     };
-  }, [refreshPasskeyOptions]);
+  }, [portablePasskey, refreshPasskeyOptions]);
 
   useEffect(() => {
-    if (!passkeyReady || !passkeyOptionsReady || loading) return;
+    if (portablePasskey || !passkeyReady || !passkeyOptionsReady || loading) return;
     if (autoStartedRef.current) return;
     if (!latestPrefetchRef.current?.options) return;
     autoStartedRef.current = true;
     void onUnlockPasskeyRef.current(latestPrefetchRef.current);
-  }, [passkeyReady, passkeyOptionsReady, loading]);
+  }, [portablePasskey, passkeyReady, passkeyOptionsReady, loading]);
 
   // Keep vault-core's bind slot clear so expand-time auto-start never races us.
   useEffect(() => {

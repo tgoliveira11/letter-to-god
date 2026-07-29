@@ -48,8 +48,8 @@ vi.mock("@tgoliveira/vault-core/react", async (importOriginal) => {
   return { ...actual, requestVaultDockExpand: vi.fn() };
 });
 
-vi.mock("@/features/passkey/passkey-vault-unlock-setup", () => ({
-  PasskeyVaultUnlockSetup: () => <div data-testid="passkey-vault-unlock-setup" />,
+vi.mock("@/features/passkey/portable-passkey-vault-setup", () => ({
+  PortablePasskeyVaultSetup: () => <div data-testid="portable-passkey-vault-setup" />,
 }));
 
 vi.mock("@/features/notes/use-vault-settings", () => ({

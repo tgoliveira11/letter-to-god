@@ -12,9 +12,9 @@ Web-first responsive MVP for private encrypted notes in a personal vault.
 
 - Next.js + TypeScript + React
 - PostgreSQL + Drizzle ORM
-- **Account authentication:** [`@tgoliveira/secure-auth@0.8.0`](https://www.npmjs.com/package/@tgoliveira/secure-auth) (experimental — security review before production)
+- **Account authentication:** [`@tgoliveira/secure-auth@0.10.0`](https://www.npmjs.com/package/@tgoliveira/secure-auth) (experimental — security review before production)
 - Web Crypto API (AES-GCM) + Argon2id recovery KDF
-- WebAuthn passkeys (@simplewebauthn) — vault unlock via PRF is app-specific; account sign-in passkeys are provided by secure-auth
+- WebAuthn passkeys (@simplewebauthn) — account authentication and portable broker vault authorization are separate ceremonies
 
 Account auth env vars are documented in `.env.example` (`AUTH_*` names). **Vercel deploy:** see [`docs/VERCEL_ENVIRONMENT_VARIABLES.md`](./docs/VERCEL_ENVIRONMENT_VARIABLES.md). Health check after starting the dev server:
 
@@ -24,7 +24,7 @@ curl http://localhost:3001/api/auth/package-health
 
 Migration history: [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
-**Admin platform and secure-auth 0.8.0:** set `AUTH_ADMIN_ENABLED=true` and `ADMIN_BOOTSTRAP_EMAIL` in `.env.local`, then run `npm run db:migrate`. In **production**, set `AUTH_RATE_LIMIT_STORE=postgres` and `RATE_LIMIT_STORE=postgres`; on Vercel, set `AUTH_TRUST_FORWARDED_HEADERS=true`. Open `/admin` when signed in as an admin user.
+**Admin platform and secure-auth 0.10.0:** set `AUTH_ADMIN_ENABLED=true` and `ADMIN_BOOTSTRAP_EMAIL` in `.env.local`, then run `npm run db:migrate`. In **production**, set `AUTH_RATE_LIMIT_STORE=postgres` and `RATE_LIMIT_STORE=postgres`; on Vercel, set `AUTH_TRUST_FORWARDED_HEADERS=true`. Open `/admin` when signed in as an admin user.
 
 Documentation index: [`docs/README.md`](./docs/README.md).
 
@@ -61,7 +61,8 @@ npm run db:migrate    # required after pulling schema updates
 npm run dev
 ```
 
-Migrations `0022_secure_auth_user_preferences.sql` and `0023_secure_auth_passkey_counter_revision.sql` are required for secure-auth 0.8.0. The latter adds compare-and-set revisioning for the shared WebAuthn signature counter; it stores no key or note plaintext.
+Migration `0024_portable_vault_broker.sql` adds secure-auth 0.10.0 broker operations, portable
+mapping state, and cleanup epochs. Apply it before enabling the broker.
 
 Open [http://localhost:3001](http://localhost:3001).
 
@@ -91,14 +92,16 @@ Production hides `/api-docs` unless `ENABLE_API_DOCS=true` in `.env.local`.
 ## Passkeys (sign-in and vault unlock)
 
 - **Sign in with passkey** on `/login` — phishing-resistant account authentication; an account with TOTP enabled still completes TOTP before receiving a full session
-- **Account settings → Passkeys** — register sign-in passkeys through secure-auth; while the vault is open, an explicit opt-in can confirm the exact new credential with one authentication prompt for vault unlock
-- **`/vault/settings` → Passkey vault unlock** — enable, test, add a synced-credential compatibility variant, bind/unbind this browser, or disable vault unlock (requires WebAuthn PRF; compatibility repair also requires a local vault password or recovery phrase)
+- **Account settings → Passkeys** — register and manage account sign-in credentials through secure-auth
+- **`/vault/settings` → Passkey vault unlock** — while the vault is already open, enable, test, or revoke portable access for an existing synced account passkey
 - **`/vault/security`** — vault security review: health summary, protection status, recovery phrase drill (local-only), passkey compatibility, and recent safe vault security events (entry from Vault settings)
 - **`/vault/recovery`** — recovery phrase management; optional link to vault settings for passkey vault unlock
-- **Passkey sign-in** authenticates the account through secure-auth. A passkey already enabled for both capabilities may also open the vault locally after the final account session exists; account login still succeeds if vault PRF/candidate unwrap is unavailable.
-- Details: [`docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md`](docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md)
+- **Passkey sign-in** authenticates only the account. Vault unlock always requires its own explicit
+  grant ceremony after the final session exists.
+- Details: [`docs/PORTABLE_PASSKEY_VAULT.md`](docs/PORTABLE_PASSKEY_VAULT.md)
 
-Run `npm run db:migrate` after pulling schema updates. Vault-core 1.6.1 uses the existing `0021_vault_passkey_multi_device_variants.sql` schema; this correction stores its confirmation marker in existing JSONB metadata and adds no migration. secure-auth 0.8.0 additionally requires `0022_secure_auth_user_preferences.sql` and `0023_secure_auth_passkey_counter_revision.sql`. See [`docs/VAULT_CORE_1_6_ADOPTION.md`](docs/VAULT_CORE_1_6_ADOPTION.md).
+Run `npm run db:migrate` after pulling schema updates. The current baseline is vault-core 1.8.0,
+secure-auth 0.10.0, and migration `0024`. Legacy PRF reads remain only for dual-run cutover.
 
 ## Two-factor authentication (optional)
 
