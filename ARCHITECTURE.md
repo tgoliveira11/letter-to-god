@@ -58,7 +58,7 @@ src/
   lib/
     crypto-client/     # Note + version encryption + legacy shims re-exporting src/modules/vault
     voice/             # Pure voice helpers: languages, audio PCM, transcript format, config
-    modules/vault/     # Vault envelopes, session, portable passkeys (@tgoliveira/vault-core@1.8.0)
+    modules/vault/     # Vault envelopes, session, portable passkeys (@tgoliveira/vault-core@1.8.1)
     api-client/        # HTTP client for API
     validation/        # Shared Zod schemas
     db/                # Drizzle client (server-only)

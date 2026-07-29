@@ -74,15 +74,24 @@ describe("no local auth implementation guard", () => {
     }
   });
 
-  it("pins @tgoliveira/secure-auth to 0.10.0", () => {
+  it("requires @tgoliveira/secure-auth 0.10.1 and resolves that release", () => {
     const packageJson = JSON.parse(readSource("package.json")) as {
       dependencies: Record<string, string>;
     };
-    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("0.10.0");
+    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("^0.10.1");
 
     const lockfile = readSource("package-lock.json");
-    expect(lockfile).toContain('"@tgoliveira/secure-auth": "0.10.0"');
-    expect(lockfile).toContain("secure-auth-0.10.0.tgz");
+    expect(lockfile).toContain('"@tgoliveira/secure-auth": "^0.10.1"');
+    expect(lockfile).toContain("secure-auth-0.10.1.tgz");
+  });
+
+  it("uses the package-owned account-only 2FA explanation", () => {
+    const packageReactBundle = readSource(
+      "node_modules/@tgoliveira/secure-auth/dist/react/index.js"
+    );
+    expect(packageReactBundle).toContain(
+      "When enabled, two-factor authentication requires a one-time code after signing in with email and password, a passkey, or OAuth. It protects account access only and remains separate from vault unlock."
+    );
   });
 
   it("delegates account auth API routes to @tgoliveira/secure-auth", () => {

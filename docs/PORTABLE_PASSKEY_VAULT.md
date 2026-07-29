@@ -1,7 +1,7 @@
 # Portable passkey vault unlock
 
-SelahKeep uses the trusted broker protocol from `@tgoliveira/vault-core` 1.8.0 and the independent
-authorization ceremony from `@tgoliveira/secure-auth` 0.10.0. One synced account passkey may be
+SelahKeep uses the trusted broker protocol from `@tgoliveira/vault-core` 1.8.1 and the independent
+authorization ceremony from `@tgoliveira/secure-auth` 0.10.1. One synced account passkey may be
 used for account login and portable vault authorization, but those remain separate actions.
 
 ## Security and ownership
@@ -13,8 +13,8 @@ used for account login and portable vault authorization, but those remain separa
 - Unlock uses a fresh non-extractable, one-use P-256 browser key. The broker seals the PUK to its
   thumbprint. Vault-core validates the response, restores a non-extractable UVK, and zeroes PUK
   bytes.
-- SelahKeep installs the UVK only after secure-auth verifies and consumes the broker's signed
-  completion receipt.
+- Vault-core invokes SelahKeep's secure-auth receipt verifier before committing the portable inner
+  key cache or returning the UVK for session installation. A rejected receipt fails closed.
 - The broker is trusted: compromise of its running service plus database and KEK can recover PUKs
   and encrypted UVK envelopes. This is an explicit availability/portability tradeoff, not a
   zero-knowledge claim against the broker.
@@ -33,8 +33,9 @@ It obtains and finalizes grants through:
 - `POST /api/account/passkeys/portable-vault-grants/verify`
 - `POST /api/account/passkeys/portable-vault-grants/finalize`
 
-The app owns mapping preparation/binding/listing under `/api/vault/portable-passkey`. The finalize
-route updates local mapping state only after secure-auth has verified and consumed the receipt.
+The app owns mapping preparation/binding/listing under `/api/vault/portable-passkey`. Vault-core
+calls the app-owned finalize route through a typed callback; the route updates local mapping state
+only after secure-auth has verified and consumed the receipt.
 
 ## Deployment order
 

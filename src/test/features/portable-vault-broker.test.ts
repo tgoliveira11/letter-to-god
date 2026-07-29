@@ -9,12 +9,14 @@ import type { PortableVaultMapping } from "@/lib/api-client/vault";
 const mocks = vi.hoisted(() => ({
   disposeEnrollment: vi.fn(),
   disposeSession: vi.fn(),
+  enrollPackage: vi.fn(),
   prepare: vi.fn(),
   bind: vi.fn(),
   grant: vi.fn(),
   finalize: vi.fn(),
   unlockResponse: vi.fn(),
   assertOperation: vi.fn(),
+  isUnlockResponse: vi.fn(),
   unseal: vi.fn(),
 }));
 
@@ -26,11 +28,7 @@ vi.mock("@tgoliveira/vault-core", () => ({
 }));
 
 vi.mock("@tgoliveira/vault-core/browser", () => ({
-  createPortableVaultBrokerEnrollmentPackage: vi.fn(async () => ({
-    puk: new Uint8Array(32).fill(7),
-    encryptedVaultKey: { version: "enc-v1" },
-    dispose: mocks.disposeEnrollment,
-  })),
+  createPortableVaultBrokerEnrollmentPackageWithSessionCache: mocks.enrollPackage,
   serializePortableVaultBrokerEnrollmentPackage: vi.fn(() => ({
     puk: "A".repeat(43),
     encryptedVaultKey: { version: "enc-v1" },
@@ -42,6 +40,7 @@ vi.mock("@tgoliveira/vault-core/browser", () => ({
     dispose: mocks.disposeSession,
   })),
   unlockPortableVaultBrokerResponse: mocks.unlockResponse,
+  isPortableVaultBrokerUnlockResponse: mocks.isUnlockResponse,
   assertVaultSessionOperationCurrent: mocks.assertOperation,
 }));
 
@@ -84,6 +83,12 @@ describe("portable vault broker browser flow", () => {
     vi.stubGlobal("fetch", vi.fn());
     mocks.prepare.mockResolvedValue({ ...mapping, state: "pending", brokerEnvelopeId: null });
     mocks.bind.mockResolvedValue({ bound: true });
+    mocks.isUnlockResponse.mockReturnValue(true);
+    mocks.enrollPackage.mockResolvedValue({
+      puk: new Uint8Array(32).fill(7),
+      encryptedVaultKey: { version: "enc-v1" },
+      dispose: mocks.disposeEnrollment,
+    });
   });
 
   it("sends enrollment material directly to the broker and disposes the PUK", async () => {
@@ -123,6 +128,11 @@ describe("portable vault broker browser flow", () => {
           puk: "A".repeat(43),
           encryptedVaultKey: { version: "enc-v1" },
         }),
+      })
+    );
+    expect(mocks.enrollPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: { ownerId: "user-1", operationId: 1 },
       })
     );
     expect(mocks.bind).toHaveBeenCalledBefore(mocks.finalize);
@@ -166,9 +176,17 @@ describe("portable vault broker browser flow", () => {
       requestId: "30000000-0000-4000-8000-000000000001",
       verifiedCredentialId: "credential-id",
     });
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ broker: "response" })));
-    mocks.unlockResponse.mockImplementation(async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          requestId: "30000000-0000-4000-8000-000000000001",
+          completionReceipt: "signed-receipt",
+        })
+      )
+    );
+    mocks.unlockResponse.mockImplementation(async (input) => {
       order.push("unwrapped");
+      await input.verifyAndConsumeCompletionReceipt("signed-receipt");
       return {
         status: "unlocked",
         vaultKey,
@@ -190,9 +208,54 @@ describe("portable vault broker browser flow", () => {
       unlockWithPortablePasskey({
         mapping,
         brokerUrl: "https://vault-broker-green.vercel.app",
+        operation: { ownerId: "user-1", operationId: 1 },
       })
     ).resolves.toBe(vaultKey);
     expect(order).toEqual(["unwrapped", "finalized"]);
+    expect(mocks.unlockResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: { ownerId: "user-1", operationId: 1 },
+        verifyAndConsumeCompletionReceipt: expect.any(Function),
+      })
+    );
+    expect(mocks.disposeSession).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when the completion receipt is rejected inside vault-core", async () => {
+    mocks.grant.mockResolvedValue({
+      grant: "signed-grant",
+      requestId: "30000000-0000-4000-8000-000000000001",
+      verifiedCredentialId: "credential-id",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          encryptedVaultKey: {
+            version: "enc-v1",
+            alg: "AES-GCM",
+            iv: "iv",
+            ciphertext: "ciphertext",
+            aad: mapping.opaqueScope,
+          },
+          sealedPuk: {},
+          requestId: "30000000-0000-4000-8000-000000000001",
+          completionReceipt: "rejected-receipt",
+        })
+      )
+    );
+    mocks.unlockResponse.mockResolvedValue({
+      status: "completion_receipt_rejected",
+      error: new Error("receipt rejected"),
+    });
+
+    await expect(
+      unlockWithPortablePasskey({
+        mapping,
+        brokerUrl: "https://vault-broker-green.vercel.app",
+        operation: { ownerId: "user-1", operationId: 1 },
+      })
+    ).rejects.toThrow("completion receipt was rejected");
+    expect(mocks.finalize).not.toHaveBeenCalled();
     expect(mocks.disposeSession).toHaveBeenCalledOnce();
   });
 
