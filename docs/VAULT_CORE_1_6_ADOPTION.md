@@ -1,12 +1,16 @@
-# vault-core 1.6.1 and secure-auth 0.8.0 adoption
+# Account and vault passkey package adoption
 
 This document is the SelahKeep-specific contract. Cryptographic behavior remains owned by the
 published `@tgoliveira/vault-core` documentation.
 
-## Pinned packages and migration
+## Package gate and migration
 
-- `@tgoliveira/vault-core@1.6.1`
-- `@tgoliveira/secure-auth@0.8.0`
+- Current published pins: `@tgoliveira/vault-core@1.6.1` and
+  `@tgoliveira/secure-auth@0.8.0`.
+- The source integration is validated against the release candidates for
+  `@tgoliveira/vault-core@1.7.0` and `@tgoliveira/secure-auth@0.9.0`. Do not merge it with the old
+  lockfile: update both exact pins and regenerate the lockfile only after both versions are
+  published.
 - `0021_vault_passkey_multi_device_variants.sql` remains the envelope/binding schema.
 - `0023_secure_auth_passkey_counter_revision.sql` adds `passkey_credentials.counter_revision`
   (`integer NOT NULL DEFAULT 0`) for compare-and-set counter updates. It is additive and does not
@@ -19,9 +23,9 @@ application rollback may leave it in place. Do not drop it in an automated rollb
 
 | Concern | Owner |
 |---|---|
-| Account registration/login assertion sanitization, WebAuthn verification, login challenge, TOTP decision, authoritative counter CAS | secure-auth |
+| Account registration/login assertion sanitization, WebAuthn verification, login challenge, TOTP decision, authoritative counter CAS, login integration result/redirect | secure-auth |
 | Vault-only WebAuthn challenges and verification, encrypted envelope persistence, browser-binding cookie, candidate ordering | SelahKeep |
-| PRF preparation/extraction/capability confirmation, candidate unwrap, compatibility repair crypto, session ownership | vault-core/browser in the SelahKeep client |
+| Public PRF input derivation, browser hydration/extraction/capability confirmation, candidate unwrap, compatibility repair crypto, session ownership | vault-core and vault-core/browser |
 | Database transactions, routes, cookies, UI, production migration | SelahKeep |
 
 Vault passwords, recovery phrases, PRF output, UVKs, and decrypted notes never cross an API. Account
@@ -58,6 +62,9 @@ updates.
 
 - `intent: "explicit"` ignores the browser binding and requests the active vault credential
   allow-list. This is used by the full unlock page, settings Test, rebind, disable, and repair.
+- The full unlock page consumes its mount-time explicit prefetch directly inside the passkey button
+  gesture. It refreshes only when no snapshot exists, avoiding a network boundary before WebAuthn
+  on Safari/PWA.
 - `intent: "quick"` requires the current HttpOnly browser binding and exact credential selection.
   The dock never broadens this auto-start optimization.
 - Stored WebAuthn transports are replayed. The app does not force `internal`.
@@ -65,10 +72,32 @@ updates.
   confirms PRF capability against that exact ID, unwraps candidates locally, and persists
   `selectedEnvelopeVariantId` only after `status: "matched"`.
 
-For a dual-capability credential, account login options may include only the public vault PRF salt.
-secure-auth sanitizes and verifies the assertion and owns the counter CAS. After the final account
-session exists, the local hook may load ciphertext candidates, unwrap, and bind. It does not run
-before TOTP. PRF absence or `no_match` never fails account login.
+For a dual-capability credential, secure-auth's server-only
+`getLoginAuthenticationExtensions({ userId, credentialIds })` callback checks that the resolved
+allow-list contains a vault-enabled credential. It uses vault-core's
+`buildPasskeyPrfAuthenticationExtensionsJson()` and may add only the public per-user PRF salt.
+The account login options route remains a pure package delegate; no app route reparses or mutates
+the response. The browser hook hydrates that JSON with the package API before SimpleWebAuthn starts
+the ceremony.
+
+On a browser with no local login hint, the user must enter their email before choosing passkey
+login. The PRF salt is user-specific, so SelahKeep deliberately does not broaden this into an
+unscoped username-less ceremony. This changes neither relying-party/domain canonicalization nor
+credential IDs.
+
+secure-auth sanitizes and verifies the assertion and owns the counter CAS. Only after the final
+account session exists does the local hook receive the verified credential ID, load ciphertext
+candidates for that exact ID, unwrap locally, and bind after `status: "matched"`. An account-only
+credential completes normally. For a vault-enabled credential, missing PRF returns
+`action_required/vault_prf_unavailable`; `no_match` returns
+`action_required/vault_envelope_no_match`. Both keep account sign-in successful and route to
+explicit `/vault/unlock` instead of silently leaving the expected vault bootstrap incomplete.
+Malformed candidate state or a cryptographic/integration failure uses secure-auth's generic
+post-login integration failure, never an account-auth rollback.
+
+When TOTP is pending, secure-auth discards the first ceremony's extension results and does not run
+the vault hook from the partial session or from TOTP completion. Account authentication remains
+independent; the user unlocks the vault through the normal explicit flow afterward.
 
 ## Compatibility repair
 
@@ -107,14 +136,21 @@ dedicated security review.
 - Cancelling the confirmation or receiving no authentication PRF leaves the credential without a
   new vault envelope and provides a recoverable Vault settings path.
 - Explicit unlock works without a browser cookie; quick unlock does not.
+- A ready explicit prefetch is used before any refresh so its WebAuthn ceremony starts within the
+  initiating user gesture.
 - Missing/stale cookies never broaden quick selection.
 - A synced credential can match any of its bounded variants without overwriting prior ciphertext.
 - Compatibility repair rejects an incorrect password/recovery phrase and does not mutate variants.
 - `no_match` guides the same credential into explicit compatibility confirmation; no WebAuthn
   ceremony starts silently or before user submission.
 - Account registration/login work without vault opt-in or PRF support.
-- Dual-capability account login never sends PRF output and only unlocks after the final session.
-- TOTP accounts never run the vault hook from a partial session.
+- A new browser with no hint requires an email to resolve the user-specific PRF salt, then can
+  unlock a dual-capability credential on that first account-passkey ceremony without a binding.
+- Dual-capability account login never sends PRF output, only unlocks after the final session, and
+  returns a typed explicit-unlock action for PRF absence or `no_match`.
+- Account-only passkeys complete normally when no vault candidates exist.
+- TOTP accounts discard the first ceremony's PRF results and never run the vault hook from a
+  partial session; vault unlock remains a later explicit ceremony.
 - Counterless `0 -> 0` assertions still advance `counter_revision`; concurrent verification loses
   the CAS and fails closed.
 - Legacy missing/null AAD remains readable; unknown explicit contexts fail closed.

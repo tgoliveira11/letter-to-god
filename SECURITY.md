@@ -54,6 +54,7 @@ Account passkeys and vault passkeys are **independent**.
 - Signing in with an account passkey never unlocks the vault by itself.
 - Vault-only setup first creates `signInEnabled: false`, `vaultUnlockEnabled: false`. Vault capability is enabled only after a separate authentication ceremony, browser-local PRF confirmation, encrypted envelope persistence, local candidate unwrap, and binding persistence.
 - Vault unlock WebAuthn: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` includes only active vault credentials and preserves persisted transports. A missing binding uses an explicit allow-list; a stale/inactive binding fails closed with 409 and is cleared. Vault-only disable revokes the credential; dual-purpose disable clears only vault capability.
+- The full unlock page prefetches explicit allow-list options and consumes that snapshot directly from the passkey button's user gesture. It does not require the quick-unlock binding and does not insert a network refresh before WebAuthn when prefetched options are ready (required for reliable Safari/PWA activation).
 - Bulk reset from unlocked `/vault/settings` uses `DELETE /api/passkeys/vault-unlock`: it atomically revokes every vault-only credential and passkey envelope, removes all browser bindings, clears vault capability on dual-purpose credentials, and preserves account sign-in capability. The product layer never deletes account passkeys through this operation.
 
 - Passkeys must not be used as raw encryption keys
@@ -285,9 +286,11 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 - Passkey and email/password sign-in both complete TOTP when account 2FA is enabled
 - OAuth + TOTP behavior is unchanged (partial session until `/login/2fa`)
 - Successful passkey login issues the same one-time `login-token` session as post-TOTP credentials login
-- A dual-capability credential may receive the public PRF salt during account login. secure-auth sanitizes the assertion before verification; PRF output remains browser-only.
-- Only after a final fully authenticated session exists may the optional login hook load encrypted candidates, unwrap locally, and install the vault session. The hook is not invoked before TOTP and account login remains successful if vault unlock is unavailable.
-- If the passkey has no vault envelope or PRF is unavailable, the account remains signed in and the vault remains locked
+- A server-only secure-auth callback receives the resolved user and credential allow-list and uses vault-core to add the public per-user PRF salt only when that allow-list contains a dual-capability credential. The public options response does not expose the user ID; the app route remains a pure package delegate.
+- A browser without a local passkey hint must supply the account email before the passkey ceremony. The user-specific salt is never guessed or broadened to a cross-account allow-list.
+- secure-auth sanitizes the assertion before verification; PRF output remains browser-only. Only after a final fully authenticated session exists may the optional login hook load exact encrypted candidates, unwrap locally, and install the vault session.
+- An account-only passkey completes login without vault work. For a vault-enabled passkey, missing PRF or `no_match` keeps the account signed in but returns a typed action that routes to explicit `/vault/unlock`; malformed/cryptographic integration state fails generically without rolling back account authentication.
+- When TOTP is pending, secure-auth discards the initial ceremony's extension results and does not invoke the vault hook from the partial session or TOTP completion. Vault unlock remains a later explicit ceremony.
 - Account passkey management: `GET /api/account/passkeys`, register/remove (package), optional vault unlock enable (`enable-vault-unlock`), status/revoke (`GET/DELETE .../vault-unlock`)
 
 ## Passkey vault unlock (PRF)

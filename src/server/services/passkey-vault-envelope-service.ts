@@ -143,7 +143,7 @@ async function getVaultUnlockAuthOptions(
     rpID,
     allowCredentials: [toAllowCredentialDescriptor(credential)],
     userVerification: "required",
-    extensions: passkeyPrfExtensions(userId),
+    extensions: await passkeyPrfExtensions(userId),
   });
   await passkeyRepository.storeChallenge({
     userId,

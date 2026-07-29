@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import { accountPasskeyLoginVaultHooks } from "@/features/passkey/account-passkey-login-vault-hooks";
+import { ApiError } from "@/lib/api-client/api-error";
 
 const mocks = vi.hoisted(() => ({
   apiPost: vi.fn(),
@@ -62,16 +63,43 @@ describe("account passkey login vault hook", () => {
     expect(accountPasskeyLoginVaultHooks.prepareOptions?.(options)).toBe(options);
   });
 
-  it("does nothing when the browser does not confirm PRF output", async () => {
+  it("hydrates the public PRF salt supplied for the first email-scoped login ceremony", async () => {
+    const options: PublicKeyCredentialRequestOptionsJSON = {
+      challenge: "challenge",
+      rpId: "example.com",
+      allowCredentials: [{ id: "credential-1", type: "public-key" }],
+      userVerification: "required",
+      extensions: {
+        prf: { eval: { first: "AQIDBA" } },
+      } as PublicKeyCredentialRequestOptionsJSON["extensions"],
+    };
+
+    const prepared = await accountPasskeyLoginVaultHooks.prepareOptions?.(options);
+    const first = (
+      prepared?.extensions as {
+        prf?: { eval?: { first?: unknown } };
+      }
+    )?.prf?.eval?.first;
+
+    expect(first).toBeInstanceOf(ArrayBuffer);
+  });
+
+  it("requires explicit vault action without failing account login when PRF is unavailable", async () => {
     mocks.resolveCapability.mockReturnValue({ state: "unsupported" });
     mocks.extractPrf.mockReturnValue(null);
+    mocks.unlockCandidates.mockResolvedValue({ status: "prf_unavailable" });
 
-    await accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
+    await expect(accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
       verifiedCredentialId: "credential-1",
       clientExtensionResults: {},
+    })).resolves.toEqual({
+      status: "action_required",
+      code: "vault_prf_unavailable",
+      redirectTo: "/vault/unlock",
+      message: "Your account is signed in. Unlock your vault to continue.",
     });
 
-    expect(mocks.apiPost).not.toHaveBeenCalled();
+    expect(mocks.persistBinding).not.toHaveBeenCalled();
   });
 
   it("unwraps exact candidates after final authentication and binds only a local match", async () => {
@@ -83,10 +111,10 @@ describe("account passkey login vault hook", () => {
       vaultKey: {} as CryptoKey,
     });
 
-    await accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
+    await expect(accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
       verifiedCredentialId: "credential-1",
       clientExtensionResults: { prf: { results: {} } },
-    });
+    })).resolves.toEqual({ status: "completed" });
 
     expect(mocks.apiPost).toHaveBeenCalledWith(
       "/api/passkeys/account-login-vault-candidates",
@@ -108,17 +136,56 @@ describe("account passkey login vault hook", () => {
     expect([...prfOutput]).toEqual(Array(32).fill(0));
   });
 
-  it("does not mutate routing when no candidate matches", async () => {
+  it("requests explicit vault action without mutating routing when no candidate matches", async () => {
     const prfOutput = new Uint8Array(32).fill(9);
     mocks.extractPrf.mockReturnValue(prfOutput);
     mocks.unlockCandidates.mockResolvedValue({ status: "no_match", attemptedCandidates: 1 });
 
-    await accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
+    await expect(accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
       verifiedCredentialId: "credential-1",
       clientExtensionResults: {},
+    })).resolves.toMatchObject({
+      status: "action_required",
+      code: "vault_envelope_no_match",
+      redirectTo: "/vault/unlock",
     });
 
     expect(mocks.persistBinding).not.toHaveBeenCalled();
     expect([...prfOutput]).toEqual(Array(32).fill(0));
+  });
+
+  it("keeps account login successful when candidate unwrap reports PRF unavailable", async () => {
+    const prfOutput = new Uint8Array(32).fill(5);
+    mocks.extractPrf.mockReturnValue(prfOutput);
+    mocks.unlockCandidates.mockResolvedValue({ status: "prf_unavailable" });
+
+    await expect(
+      accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
+        verifiedCredentialId: "credential-1",
+        clientExtensionResults: { prf: { results: {} } },
+      })
+    ).resolves.toMatchObject({
+      status: "action_required",
+      code: "vault_prf_unavailable",
+      redirectTo: "/vault/unlock",
+    });
+
+    expect(mocks.persistBinding).not.toHaveBeenCalled();
+    expect([...prfOutput]).toEqual(Array(32).fill(0));
+  });
+
+  it("completes normally when the verified passkey is account-only", async () => {
+    mocks.extractPrf.mockReturnValue(null);
+    mocks.apiPost.mockRejectedValue(new ApiError(404, "No vault capability"));
+
+    await expect(
+      accountPasskeyLoginVaultHooks.onFullyAuthenticated?.({
+        verifiedCredentialId: "credential-1",
+        clientExtensionResults: {},
+      })
+    ).resolves.toEqual({ status: "completed" });
+
+    expect(mocks.unlockCandidates).not.toHaveBeenCalled();
+    expect(mocks.persistBinding).not.toHaveBeenCalled();
   });
 });

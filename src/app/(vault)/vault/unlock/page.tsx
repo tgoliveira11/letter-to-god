@@ -128,7 +128,9 @@ export default function VaultUnlockPage() {
           onUnlockPasskey={
             explicitPasskeyReady
               ? async () => {
-                  const latest = (await refresh()) ?? prefetch;
+                  // Preserve Safari/PWA transient user activation: when mount-time options are
+                  // ready, start WebAuthn immediately instead of inserting a network refresh.
+                  const latest = prefetch?.options ? prefetch : await refresh();
                   await unlockFromPasskey(latest?.options, latest?.credentialId);
                   router.push(afterUnlockPath);
                 }

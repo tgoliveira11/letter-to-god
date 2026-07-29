@@ -200,4 +200,28 @@ describe("account/vault passkey interop routes", () => {
       "variant-2"
     );
   });
+
+  it("loads all exact-credential candidates when a new browser has no binding", async () => {
+    mocks.getCandidatesAfterAccountPasskeyLogin.mockResolvedValue({
+      userId: USER_ID,
+      verifiedCredentialId: "credential-1",
+      bindingProof: "binding-proof",
+      candidates: [],
+    });
+    const { POST } = await import("@/app/api/passkeys/account-login-vault-candidates/route");
+    const response = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({ verifiedCredentialId: "credential-1" }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.findBinding).not.toHaveBeenCalled();
+    expect(mocks.getCandidatesAfterAccountPasskeyLogin).toHaveBeenCalledWith(
+      USER_ID,
+      "credential-1",
+      null
+    );
+  });
 });

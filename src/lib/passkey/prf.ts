@@ -1,16 +1,6 @@
-import { createHash } from "crypto";
 import type { AuthenticationExtensionsClientInputs } from "@simplewebauthn/server";
+import { buildPasskeyPrfAuthenticationExtensionsJson } from "@tgoliveira/vault-core";
 import { SELAHKEEP_PRF_SALT_PREFIX } from "@/modules/vault/selahkeep-profile";
-
-export function passkeyPrfSaltBytes(userId: string): Uint8Array {
-  return new Uint8Array(
-    createHash("sha256").update(`${SELAHKEEP_PRF_SALT_PREFIX}${userId}`).digest()
-  );
-}
-
-export function passkeyPrfSaltBase64Url(userId: string): string {
-  return Buffer.from(passkeyPrfSaltBytes(userId)).toString("base64url");
-}
 
 /**
  * PRF inputs for WebAuthn ceremonies. Always `prf.eval` with the stable per-user
@@ -18,11 +8,13 @@ export function passkeyPrfSaltBase64Url(userId: string): string {
  * contract. Vault unlock scopes to a single credential server-side, so
  * `evalByCredential` is never used: iOS/Safari can return divergent PRF bytes for it.
  */
-export function passkeyPrfExtensions(userId: string): AuthenticationExtensionsClientInputs {
-  const salt = passkeyPrfSaltBase64Url(userId);
-  return {
-    prf: {
-      eval: { first: salt },
-    },
-  } as AuthenticationExtensionsClientInputs;
+export async function passkeyPrfExtensions(
+  userId: string
+): Promise<AuthenticationExtensionsClientInputs> {
+  // SimpleWebAuthn's server DOM shim does not yet declare WebAuthn PRF, although it accepts and
+  // serializes the package-built extension object at runtime.
+  return (await buildPasskeyPrfAuthenticationExtensionsJson(
+    SELAHKEEP_PRF_SALT_PREFIX,
+    userId
+  )) as AuthenticationExtensionsClientInputs;
 }
