@@ -19,13 +19,20 @@ describe("passkey login options route", () => {
       Response.json({
         options: {
           challenge: "abc",
-          allowCredentials: [{ id: "cred-1", type: "public-key" }],
+          allowCredentials: [
+            {
+              id: "cred-1",
+              type: "public-key",
+              transports: ["internal", "hybrid"],
+            },
+          ],
+          hints: ["client-device", "hybrid"],
         },
       })
     );
   });
 
-  it("is a pure secure-auth delegate; server extension composition stays in package config", async () => {
+  it("preserves secure-auth internal-first transports and hybrid hints as a pure delegate", async () => {
     const { POST } = await import("@/app/api/auth/passkey/login/options/route");
     const request = new Request("http://localhost", { method: "POST" });
     const response = await POST(request);
@@ -34,7 +41,14 @@ describe("passkey login options route", () => {
     expect(await response.json()).toEqual({
       options: {
         challenge: "abc",
-        allowCredentials: [{ id: "cred-1", type: "public-key" }],
+        allowCredentials: [
+          {
+            id: "cred-1",
+            type: "public-key",
+            transports: ["internal", "hybrid"],
+          },
+        ],
+        hints: ["client-device", "hybrid"],
       },
     });
   });

@@ -12,7 +12,7 @@ Web-first responsive MVP for private encrypted notes in a personal vault.
 
 - Next.js + TypeScript + React
 - PostgreSQL + Drizzle ORM
-- **Account authentication:** [`@tgoliveira/secure-auth@0.10.1`](https://www.npmjs.com/package/@tgoliveira/secure-auth) (experimental — security review before production)
+- **Account authentication:** [`@tgoliveira/secure-auth@0.10.2`](https://www.npmjs.com/package/@tgoliveira/secure-auth) (experimental — security review before production)
 - Web Crypto API (AES-GCM) + Argon2id recovery KDF
 - WebAuthn passkeys (@simplewebauthn) — account authentication and portable broker vault authorization are separate ceremonies
 
@@ -24,7 +24,7 @@ curl http://localhost:3001/api/auth/package-health
 
 Migration history: [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
-**Admin platform and secure-auth 0.10.1:** set `AUTH_ADMIN_ENABLED=true` and `ADMIN_BOOTSTRAP_EMAIL` in `.env.local`, then run `npm run db:migrate`. In **production**, set `AUTH_RATE_LIMIT_STORE=postgres` and `RATE_LIMIT_STORE=postgres`; on Vercel, set `AUTH_TRUST_FORWARDED_HEADERS=true`. Open `/admin` when signed in as an admin user.
+**Admin platform and secure-auth 0.10.2:** set `AUTH_ADMIN_ENABLED=true` and `ADMIN_BOOTSTRAP_EMAIL` in `.env.local`, then run `npm run db:migrate`. In **production**, set `AUTH_RATE_LIMIT_STORE=postgres` and `RATE_LIMIT_STORE=postgres`; on Vercel, set `AUTH_TRUST_FORWARDED_HEADERS=true`. Open `/admin` when signed in as an admin user.
 
 Documentation index: [`docs/README.md`](./docs/README.md).
 
@@ -101,7 +101,7 @@ Production hides `/api-docs` unless `ENABLE_API_DOCS=true` in `.env.local`.
 - Details: [`docs/PORTABLE_PASSKEY_VAULT.md`](docs/PORTABLE_PASSKEY_VAULT.md)
 
 Run `npm run db:migrate` after pulling schema updates. The current baseline is vault-core 1.8.1,
-secure-auth 0.10.1, and migration `0024`. Legacy PRF reads remain only for dual-run cutover.
+secure-auth 0.10.2, and migration `0024`. Legacy PRF reads remain only for dual-run cutover.
 
 ## Two-factor authentication (optional)
 

@@ -74,15 +74,15 @@ describe("no local auth implementation guard", () => {
     }
   });
 
-  it("requires @tgoliveira/secure-auth 0.10.1 and resolves that release", () => {
+  it("requires @tgoliveira/secure-auth 0.10.2 and resolves that release", () => {
     const packageJson = JSON.parse(readSource("package.json")) as {
       dependencies: Record<string, string>;
     };
-    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("^0.10.1");
+    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("^0.10.2");
 
     const lockfile = readSource("package-lock.json");
-    expect(lockfile).toContain('"@tgoliveira/secure-auth": "^0.10.1"');
-    expect(lockfile).toContain("secure-auth-0.10.1.tgz");
+    expect(lockfile).toContain('"@tgoliveira/secure-auth": "^0.10.2"');
+    expect(lockfile).toContain("secure-auth-0.10.2.tgz");
   });
 
   it("uses the package-owned account-only 2FA explanation", () => {
@@ -91,6 +91,18 @@ describe("no local auth implementation guard", () => {
     );
     expect(packageReactBundle).toContain(
       "When enabled, two-factor authentication requires a one-time code after signing in with email and password, a passkey, or OAuth. It protects account access only and remains separate from vault unlock."
+    );
+  });
+
+  it("installs the package contract for internal-first passkey options with hybrid fallback", () => {
+    const packageNextBundle = readSource(
+      "node_modules/@tgoliveira/secure-auth/dist/next/index.js"
+    );
+    expect(packageNextBundle).toContain(
+      'for (const preferred of ["internal", "hybrid"])'
+    );
+    expect(packageNextBundle).toContain(
+      'transports.has("internal") && transports.has("hybrid") ? ["client-device", "hybrid"]'
     );
   });
 
