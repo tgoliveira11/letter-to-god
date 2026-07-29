@@ -3,6 +3,7 @@ import {
   applyContentSecurityPolicy,
   buildContentSecurityPolicy,
   createContentSecurityPolicyNonce,
+  getPortableVaultBrokerConnectSource,
 } from "@/lib/security/content-security-policy";
 
 describe("content-security-policy", () => {
@@ -53,6 +54,48 @@ describe("content-security-policy", () => {
     vi.stubEnv("NEXT_PUBLIC_VOICE_NOTES_ENABLED", "false");
     const policy = buildContentSecurityPolicy("n");
     expect(policy).not.toContain("huggingface.co");
+  });
+
+  it("allows only the configured exact HTTPS portable broker origin", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VAULT_PORTABLE_BROKER_ENABLED", "true");
+    vi.stubEnv(
+      "VAULT_PORTABLE_BROKER_URL",
+      "https://vault-broker-green.vercel.app/"
+    );
+
+    expect(getPortableVaultBrokerConnectSource()).toBe(
+      "https://vault-broker-green.vercel.app"
+    );
+    expect(buildContentSecurityPolicy("n")).toContain(
+      "connect-src 'self' https://huggingface.co https://*.hf.co https://cdn.jsdelivr.net https://vault-broker-green.vercel.app"
+    );
+  });
+
+  it.each([
+    "http://vault-broker.example.com",
+    "https://user:secret@vault-broker.example.com",
+    "https://vault-broker.example.com/api",
+    "https://vault-broker.example.com?tenant=selahkeep",
+    "https://vault-broker.example.com#fragment",
+    "https://*.example.com",
+    "not-a-url",
+  ])("fails closed for unsafe portable broker CSP source %s", (brokerUrl) => {
+    vi.stubEnv("VAULT_PORTABLE_BROKER_ENABLED", "true");
+    vi.stubEnv("VAULT_PORTABLE_BROKER_URL", brokerUrl);
+
+    expect(getPortableVaultBrokerConnectSource()).toBeUndefined();
+    expect(buildContentSecurityPolicy("n")).not.toContain(brokerUrl);
+  });
+
+  it("omits the portable broker origin when the feature is disabled", () => {
+    vi.stubEnv("VAULT_PORTABLE_BROKER_ENABLED", "false");
+    vi.stubEnv("VAULT_PORTABLE_BROKER_URL", "https://vault-broker.example.com");
+
+    expect(getPortableVaultBrokerConnectSource()).toBeUndefined();
+    expect(buildContentSecurityPolicy("n")).not.toContain(
+      "https://vault-broker.example.com"
+    );
   });
 
   it("allows dev eval and inline scripts", () => {

@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Added the enabled portable vault broker's exact validated HTTPS origin to CSP `connect-src`, so
+  direct browser enrollment and unlock requests are allowed without broadening policy to paths,
+  credentials, query strings, fragments, wildcards, or non-HTTPS sources.
 - Updated portable passkey enrollment and unlock for `vault-core` 1.8.1 so an already-open,
   non-extractable vault key is re-wrapped from owner-scoped memory, and broker receipt verification
   succeeds before that re-wrap cache is committed.

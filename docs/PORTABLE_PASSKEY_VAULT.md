@@ -27,6 +27,10 @@ and adds `vault_portable_broker_envelopes` plus `passkey_cleanup_epochs`. App ma
 opaque UUID AAD scope, broker envelope ID, account credential relation, state, and timestamps.
 
 The browser calls `${VAULT_PORTABLE_BROKER_URL}/api/v1/envelopes/{enroll,unlock,revoke}` directly.
+The configured value must be one exact HTTPS origin (for example,
+`https://vault-broker-green.vercel.app`) with no credentials, path, query, fragment, or wildcard.
+When the portable broker feature is enabled, that validated origin alone is added to the
+application CSP `connect-src`; invalid values are omitted fail-closed.
 It obtains and finalizes grants through:
 
 - `POST /api/account/passkeys/portable-vault-grants/options`
