@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import postgres from "postgres";
+import { runSerializableTransaction } from "./lib/postgres-transaction.mjs";
 
 function loadEnvLocal() {
   if (!existsSync(".env.local")) return;
@@ -98,7 +99,7 @@ async function collectCounts(tx, cutoff) {
 }
 
 async function prepareEpoch(sql, expected) {
-  return sql.begin("serializable", async (tx) => {
+  return runSerializableTransaction(sql, async (tx) => {
     const [{ cutoff }] = await tx`SELECT clock_timestamp() cutoff`;
     const actual = await collectCounts(tx, cutoff);
     assertExactCounts(expected, actual, "Prepared snapshot counts");
@@ -127,7 +128,7 @@ async function inspectEpoch(sql, epochId, expected) {
 }
 
 async function executeEpoch(sql, epochId, expected) {
-  return sql.begin("serializable", async (tx) => {
+  return runSerializableTransaction(sql, async (tx) => {
     await tx`LOCK TABLE passkey_credentials, vault_envelopes, vault_passkey_device_bindings,
       webauthn_challenges, user_two_factor_login_challenges, user_two_factor_login_tokens,
       account_sessions, webauthn_broker_operations, vault_portable_broker_envelopes,
