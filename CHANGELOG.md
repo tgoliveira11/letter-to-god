@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the passkey cleanup runner to open PostgreSQL serializable transactions with valid
+  postgres.js isolation-level syntax.
+
 ### Added
 
 - **Portable passkey vault unlock.** SelahKeep now integrates `vault-core` 1.8.0, the trusted
