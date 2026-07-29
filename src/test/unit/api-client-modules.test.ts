@@ -65,6 +65,19 @@ describe("typed API client modules", () => {
             { status: 200 }
           );
         }
+        if (url === "/api/vault/portable-passkey" && !init?.method) {
+          return new Response(JSON.stringify({ mappings: [], active: [], pending: [] }), {
+            status: 200,
+          });
+        }
+        if (url === "/api/vault/portable-passkey/prepare" && init?.method === "POST") {
+          return new Response(JSON.stringify({ id: "mapping-1", state: "pending" }), {
+            status: 200,
+          });
+        }
+        if (url === "/api/vault/portable-passkey/bind" && init?.method === "POST") {
+          return new Response(JSON.stringify({ bound: true }), { status: 200 });
+        }
         if (url === "/api/passkeys/vault-unlock" && init?.method === "DELETE") {
           return new Response(
             JSON.stringify({
@@ -166,6 +179,27 @@ describe("typed API client modules", () => {
       })
     ).resolves.toEqual({ id: "env-phrase", createdAt: "2026-06-17T00:00:00.000Z" });
     await expect(vaultApi.unlockWithRecoveryCode()).resolves.toHaveProperty("encryptedVaultKey");
+    await expect(vaultApi.listPortablePasskeys()).resolves.toEqual({
+      mappings: [],
+      active: [],
+      pending: [],
+    });
+    await expect(
+      vaultApi.preparePortablePasskey({
+        credentialDbId: "20000000-0000-4000-8000-000000000001",
+        opaqueScope: {
+          userId: "30000000-0000-4000-8000-000000000001",
+          resourceId: "40000000-0000-4000-8000-000000000001",
+        },
+      })
+    ).resolves.toMatchObject({ id: "mapping-1" });
+    await expect(
+      vaultApi.bindPortablePasskey({
+        mappingId: "50000000-0000-4000-8000-000000000001",
+        brokerEnvelopeId: "60000000-0000-4000-8000-000000000001",
+        requestId: "70000000-0000-4000-8000-000000000001",
+      })
+    ).resolves.toEqual({ bound: true });
   });
 
   it("passkeysApi covers scoped vault-passkey removal", async () => {

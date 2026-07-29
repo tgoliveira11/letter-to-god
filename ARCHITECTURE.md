@@ -58,7 +58,7 @@ src/
   lib/
     crypto-client/     # Note + version encryption + legacy shims re-exporting src/modules/vault
     voice/             # Pure voice helpers: languages, audio PCM, transcript format, config
-    modules/vault/     # Vault envelopes, session, passkey PRF (@tgoliveira/vault-core@1.6.1)
+    modules/vault/     # Vault envelopes, session, portable passkeys (@tgoliveira/vault-core@1.8.0)
     api-client/        # HTTP client for API
     validation/        # Shared Zod schemas
     db/                # Drizzle client (server-only)
@@ -74,11 +74,14 @@ See also [`docs/API_REFERENCE.md`](./docs/API_REFERENCE.md) and [`docs/openapi.y
 
 **`/api-docs` layout:** Swagger UI intentionally renders **without** `SiteShell` (`Nav` / `SiteFooter`) so the vendor UI can use the full viewport. The page still includes the global skip link from the root layout and sets `id="main-content"` on its `<main>`. In production the route returns 404 unless `ENABLE_API_DOCS=true` (see `.env.example` and `docs/API_REFERENCE.md`).
 
-- Passkey registration is capability detection only. Every vault enrollment requires an exact post-registration `get()` confirmation; only its PRF output may wrap a durable envelope. Existing variants are never replaced implicitly.
-- **Account passkeys and vault passkeys are independent** — vault-only setup uses `POST /api/passkeys/register` with `vaultOnly: true` (`signInEnabled: false`, `authenticatorAttachment: "platform"`); account passkey sign-in never unlocks the vault
-- Vault unlock authenticate: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` — missing binding uses the explicit active allow-list; a stale binding fails closed. Stored transports are preserved. Verification returns at most five encrypted variants for the verified credential; only a local candidate match may persist `selectedEnvelopeVariantId`.
-- `vault_envelopes.passkey_credential_id` identifies the logical credential; `vault_passkey_device_bindings` is many-to-one and its composite FK ensures the selected variant belongs to that credential. Migration `0021` preserves legacy ciphertext/AAD/IDs byte-for-byte.
-- Passkey-based vault unlock requires PRF support. If PRF is unavailable, the app must not create a passkey vault envelope and must not present that passkey as a recovery method.
+- Portable passkey unlock is canonical. One synced account credential may authorize the broker from
+  multiple browsers without PRF variants or browser binding rows.
+- Account login, portable grant authorization, and vault session installation are distinct states.
+  Login never issues a grant or installs a UVK.
+- `vault_portable_broker_envelopes` stores only app routing metadata and opaque AAD scope. PUK and
+  encrypted UVK envelope custody belongs to the broker; the browser calls it directly.
+- Migration `0024` includes secure-auth broker operations and app mapping/cleanup epoch tables.
+  `vault_envelopes` PRF variants and browser bindings are legacy dual-run reads only.
 - WebAuthn challenge validation uses atomic `consumeValidChallenge()` only (`findValidChallenge` removed)
 - WebAuthn challenge indexes: `idx_webauthn_challenges_lookup`, `idx_webauthn_challenges_expires_at`
 
@@ -137,7 +140,8 @@ Note version snapshot -> (same) Note Key -> User Vault Key   # note_versions, AA
 Vault index (titles for list) -> User Vault Key
 ```
 
-Vault envelope methods (LTG): `password`, `recovery_phrase`, `passkey_prf` (+ legacy `recovery_code` for vault-v1). Trusted devices were removed — see `docs/TRUSTED_DEVICES_REMOVAL.md`.
+App-held envelope methods are `password` and `recovery_phrase`; `passkey_prf` and `recovery_code`
+are legacy. Portable UVK envelopes are broker-held and referenced by opaque mapping rows.
 
 ## UI layer
 
@@ -147,7 +151,8 @@ Vault envelope methods (LTG): `password`, `recovery_phrase`, `passkey_prf` (+ le
 - **Public marketing:** Home page sections and copy in `src/lib/marketing/home-copy.ts`
 - **Vault setup:** `/vault/setup` — `PasswordSetupFields` (secure-auth) + BIP39 recovery phrase wizard; policy from `src/lib/config/vault-password-policy.ts`
 - **Recovery management:** `/vault/recovery` — status-gated recovery phrase replace (no initial phrase generation post-setup); link to `/vault/settings` for optional passkey vault unlock
-- **Passkey vault unlock:** `/vault/settings` — `PasskeyVaultUnlockSetup`; availability state in `src/lib/passkey/vault-passkey-availability.ts`; PRF diagnostics in `src/lib/passkey/passkey-prf-diagnostics.ts`
+- **Passkey vault unlock:** `/vault/settings` — `PortablePasskeyVaultSetup`; enroll/test/revoke a
+  synced account credential without exposing PRF or browser-binding concepts
 - **Vault security review:** `/vault/security` — health summary, protection indicators, local recovery phrase drill (`verifyRecoveryPhraseDrill`), passkey compatibility guide, safe audit event log (`GET/POST /api/vault/security-events`)
 - **Vault unlock:** `VaultDockQuickUnlock` in `VaultStatusDock` shows **one primary method** when locked (passkey when configured, otherwise vault password). Recovery phrase is **only** on `/vault/unlock`. Dock is hidden before vault setup and on `/vault/unlock`. See [`docs/VAULT_DOCK_UX.md`](./docs/VAULT_DOCK_UX.md). Collapsed handle shows `Vault` or countdown; expanded open state is compact with **Lock now**; auto-collapse via `useVaultDockDismiss`.
 - **Vault setup:** `/vault/setup` — recovery phrase copy/download + randomized word-position confirmation (3 words for 12-word phrase, 6 for 24-word). See [`docs/VAULT_SETUP_RECOVERY_PHRASE_CONFIRMATION.md`](./docs/VAULT_SETUP_RECOVERY_PHRASE_CONFIRMATION.md).
@@ -194,7 +199,10 @@ Failures roll back all related writes.
 
 Account passkey sign-in is owned by `@tgoliveira/secure-auth` (`LoginPage` and package client) and establishes only the account session.
 
-Account passkey verification and counter CAS remain package-owned. SelahKeep may add only the public vault PRF salt to options for an already dual-capability credential. After secure-auth creates a final session, a browser-only hook may unwrap encrypted candidates locally; it never sends PRF output and never makes account login depend on vault unlock. Explicit vault unlock remains available through `/api/passkeys/authenticate`.
+Account passkey verification and counter CAS remain package-owned. After a final account session,
+secure-auth may run a separate exact-credential portable grant ceremony. Vault-core restores the UVK
+in the browser and SelahKeep installs it only after receipt finalization. Legacy PRF login hooks are
+not used by the canonical login page.
 
 See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md) and [`docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md`](./docs/archive/PASSKEY_LOGIN_VAULT_UNLOCK.md).
 

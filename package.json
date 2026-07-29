@@ -20,6 +20,7 @@
     "db:check-auth": "node scripts/check-auth-db.mjs",
     "db:check-kanban": "node scripts/check-kanban-db.mjs",
     "db:check-vault-admin": "node scripts/check-vault-admin-db.mjs",
+    "passkeys:cleanup": "node scripts/cleanup-passkeys.mjs",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "postinstall": "mkdir -p public/swagger-ui && cp node_modules/swagger-ui-dist/swagger-ui.css node_modules/swagger-ui-dist/swagger-ui-bundle.js public/swagger-ui/ && node scripts/copy-ffmpeg.mjs"
@@ -31,8 +32,8 @@
     "@simplewebauthn/browser": "^13.1.0",
     "@simplewebauthn/server": "^13.1.1",
     "@tgoliveira/outpost": "1.2.2",
-    "@tgoliveira/secure-auth": "0.9.1",
-    "@tgoliveira/vault-core": "1.7.0",
+    "@tgoliveira/secure-auth": "0.10.0",
+    "@tgoliveira/vault-core": "1.8.0",
     "@tiptap/extension-link": "^3.27.0",
     "@tiptap/extension-placeholder": "^3.27.0",
     "@tiptap/extension-task-item": "^3.27.0",

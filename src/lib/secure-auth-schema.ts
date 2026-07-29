@@ -31,6 +31,7 @@ const REQUIRED_AUTH_TABLES = [
   "login_attempt_counters",
   "user_preferences",
   "passkey_credentials",
+  "webauthn_broker_operations",
 ] as const;
 
 const REQUIRED_PASSKEY_CREDENTIAL_COLUMNS = ["counter_revision"] as const;

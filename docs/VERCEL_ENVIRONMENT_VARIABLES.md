@@ -117,6 +117,30 @@ WEBAUTHN_RP_ID=selahkeep.com
 
 Preview deployments each have a unique `*.vercel.app` hostname unless you use a fixed staging domain. Passkeys registered on production will not work on a different preview URL.
 
+### Portable vault broker
+
+Apply migration `0024_portable_vault_broker.sql` before enabling these variables. Production and
+Preview must use separate signing keys, receipt keys, opaque subject keys, broker registrations,
+and databases.
+
+| Variable | Required when enabled | Production value / format |
+|---|---|---|
+| `VAULT_PORTABLE_BROKER_ENABLED` | Yes | `true` only after migration and broker registration |
+| `VAULT_PORTABLE_BROKER_URL` | Yes | `https://vault-broker-green.vercel.app` |
+| `VAULT_LEGACY_PASSKEY_PRF_ENROLLMENT_ENABLED` | Recommended explicit | `false` |
+| `PORTABLE_VAULT_GRANT_ISSUER` | Yes | `https://www.selahkeep.com` |
+| `PORTABLE_VAULT_BROKER_APP_ID` | Yes | `selahkeep` |
+| `PORTABLE_VAULT_GRANT_AUDIENCE` | Yes | Broker origin |
+| `PORTABLE_VAULT_GRANT_TTL_SECONDS` | Yes | `60` |
+| `PORTABLE_VAULT_SUBJECT_KEY` | Yes, sensitive | Canonical base64url for a separate 32–64 byte random key |
+| `PORTABLE_VAULT_GRANT_PRIVATE_JWK_B64` | Yes, sensitive | Base64url of the private ES256 JWK JSON; never expose to the client |
+| `PORTABLE_VAULT_BROKER_RECEIPT_ISSUER` | Yes | Broker origin |
+| `PORTABLE_VAULT_BROKER_RECEIPT_PUBLIC_JWKS_B64` | Yes | Base64url JSON array `[publicJwk]`, not a single object |
+
+The private grant JWK source and receipt public JWK source are operational secret material; never
+paste their decoded values into documentation, logs, tickets, or client-visible variables. See
+[`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md) for deployment and cleanup order.
+
 ### Email verification gate
 
 | Variable | Required? | Environments | Example value | Used by | Purpose | Notes |

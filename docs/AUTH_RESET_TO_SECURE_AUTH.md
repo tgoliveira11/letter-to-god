@@ -1,7 +1,12 @@
 # Auth reset to `@tgoliveira/secure-auth`
 
-Branch: `main` (Phase 0 complete) · **Current published pin:** `0.8.0` (see `package.json`) ·
-**Current version:** `0.9.1`
+Branch: `main` (Phase 0 complete) · **Current published pin:** `0.10.0` (see `package.json`)
+
+> **Portable-vault amendment (2026-07-29):** The auth ownership reset remains current. The PRF
+> vault routes and post-login hook described in historical tables below are superseded by
+> [`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md). Account login never unlocks the
+> vault. After a fully authenticated/TOTP-complete session, secure-auth may issue an exact-
+> credential, UV-required, single-use portable grant for an explicit broker operation.
 
 ## Goal
 
@@ -24,10 +29,10 @@ Remove competing local auth/account implementation. Keep thin `@tgoliveira/secur
 | Area | Notes |
 |------|-------|
 | Notes | pages, API, crypto-client, services, repositories |
-| Vault | init/status, recovery phrase, trusted devices, passkey PRF envelopes |
-| Vault passkeys | `/api/passkeys/**` recovery registration/authentication |
-| Vault passkey unlock | Separate signed-in ceremony via `/api/passkeys/authenticate` |
-| Enable vault on account passkey | `/api/account/passkeys/[id]/enable-vault-unlock` via `passkeyVaultEnvelopeService` |
+| Vault | init/status, recovery phrase, portable broker mappings, legacy PRF compatibility reads |
+| Vault passkeys | Portable mappings and direct browser-to-broker operations; legacy `/api/passkeys/**` reads during cutover |
+| Vault passkey unlock | Explicit portable grant + broker receipt after account sign-in |
+| Enable vault on account passkey | Portable enrollment from `/vault/settings`; no new PRF envelope writes |
 | Session guards | `src/lib/auth/session.ts` using `secureAuth.getServices().getAuthOptions()` |
 | Crypto | `src/lib/crypto-client/**` |
 
@@ -53,12 +58,14 @@ Package owns: login, register, OAuth, account passkey sign-in, 2FA, password flo
 |------|-------|
 | Account passkey sign-in | **Package** (`passkeyLoginOptions`, `passkeyLoginVerify`, package `signInWithPasskey`); optional app hook runs only after final authentication |
 | Account passkey management (list/register/delete) | **Package** (`passkeysList`, `passkeyRegister`, `passkeyById`) |
-| Explicit vault passkey unlock | **Product** (`/api/passkeys/authenticate`, after account sign-in) |
-| Recovery passkey register/authenticate | **Product** (`/api/passkeys/**`, `passkeyService`) |
-| Enable vault unlock on existing account passkey | **Product** (`passkeyVaultEnvelopeService`) |
+| Explicit vault passkey unlock | **Product + packages** (secure-auth grant, direct broker call, vault-core unwrap, app receipt finalization) |
+| Legacy recovery passkey authenticate | **Product** compatibility read (`/api/passkeys/**`, `passkeyService`) |
+| Enable vault unlock on existing account passkey | **Product + packages** portable enrollment; broker holds the encrypted envelope |
 | Enable account sign-in on a vault-only passkey | **Package** (`passkeyEnableSignIn`; exact credential + UV verification) |
 
-### TODO_SECURITY_REVIEW_REQUIRED
+### Historical PRF integration (superseded)
+
+The following bullets describe the prior design and must not be used for new implementation:
 
 - Optional account-login vault unlock is fail-open for account authentication, runs only after the final session, and keeps PRF output browser-only.
 - The login-options route stays a pure package delegate. A server-only package callback adds the

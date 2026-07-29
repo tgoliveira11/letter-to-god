@@ -1,5 +1,11 @@
 # ADR-005 — SelahKeep Cryptography (Argon2id, Recovery Phrase, Note Keys)
 
+> **Passkey amendment (2026-07-29):** The Argon2id, recovery phrase, UVK, Note Key, and AAD
+> decisions in this ADR remain accepted. Its `passkey_prf` ownership and persistence sections are
+> superseded by [`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md). PRF envelopes and
+> browser bindings are legacy compatibility data only; new passkey enrollment uses broker-held
+> portable envelopes and app-held opaque routing metadata.
+
 | Field | Value |
 |-------|--------|
 | **Status** | Accepted |
@@ -85,7 +91,8 @@ Implementation: `@tgoliveira/vault-core` (Argon2id KDF); SelahKeep wrappers in `
 |------|-------|---------------|---------|
 | `password` | **1 — implement** | `password` | Vault password/passphrase unwraps UVK |
 | `recovery_phrase` | **1 — implement** | `recovery_phrase` | Recovery phrase unwraps UVK |
-| `passkey_prf` | **4 — implemented** | `passkey_authorized_device` | PRF-derived key unwraps UVK; see ADR-006 |
+| `passkey_prf` | legacy compatibility only | `passkey_authorized_device` | Pre-cutover PRF-derived envelope; no new enrollment |
+| `portable_passkey` | current | broker envelope + `vault_portable_broker_envelopes` mapping | Direct browser-to-broker unwrap; see portable passkey runbook |
 | `trusted_device` | legacy | `trusted_device` | Device secret unwraps UVK |
 | `recovery_code` | legacy | `recovery_code` | 17-word legacy code |
 | `passkey_authorized_device` | legacy/4 | `passkey_authorized_device` | Passkey PRF envelope |
@@ -93,6 +100,8 @@ Implementation: `@tgoliveira/vault-core` (Argon2id KDF); SelahKeep wrappers in `
 Phase 1 creates exactly one `password` and one `recovery_phrase` envelope at setup.
 
 ### Passkey envelope removal
+
+The paragraph below described the pre-cutover PRF implementation and is retained only as historical context. Current ownership, revocation, and cleanup rules are defined by the portable passkey runbook.
 
 Passkey PRF crypto and candidate handling remain owned by `@tgoliveira/vault-core`; SelahKeep owns credential rows, envelope persistence, browser bindings, and transactions. A bulk vault-passkey reset revokes all active `passkey_authorized_device` envelopes and vault-only credentials, removes browser bindings, and clears only vault capability from credentials that are also used for account sign-in. It does not rotate the UVK, password envelope, or recovery phrase envelope, and it never deletes account-passkey capability from the vault product boundary.
 

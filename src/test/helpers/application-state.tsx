@@ -30,7 +30,13 @@ export function TestApplicationState({
         vaultStatus: null,
         vaultAutoLockUserMinutes: null,
         adminAccess: false,
-        features: { preferences: true },
+        features: {
+          preferences: true,
+          portableVaultBroker: {
+            enabled: false,
+            brokerUrl: "https://vault-broker-green.vercel.app",
+          },
+        },
         ...overrides,
       }}
     >

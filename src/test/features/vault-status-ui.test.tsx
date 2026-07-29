@@ -50,6 +50,7 @@ vi.mock("@/features/vault/use-vault", () => ({
     loading: false,
     error: null,
     unlockFromPasskey: vi.fn(),
+    unlockFromPortablePasskey: vi.fn(),
     unlockFromRecoveryCode: vi.fn(),
     unlockFromVaultPassword: vi.fn(),
     unlockFromRecoveryPhrase: vi.fn(),
@@ -86,8 +87,8 @@ vi.mock("@/lib/crypto-client/note-drafts", () => ({
   listEncryptedNoteDraftKeys: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("@/features/passkey/passkey-vault-unlock-setup", () => ({
-  PasskeyVaultUnlockSetup: () => <div data-testid="passkey-vault-unlock-setup" />,
+vi.mock("@/features/passkey/portable-passkey-vault-setup", () => ({
+  PortablePasskeyVaultSetup: () => <div data-testid="portable-passkey-vault-setup" />,
 }));
 
 vi.mock("@/features/notes/use-vault-settings", () => ({
@@ -285,7 +286,7 @@ describe("vault status UI", () => {
 
     render(<VaultSettingsPage />);
     expect(await screen.findByText("Metadata only (recommended)")).toBeTruthy();
-    expect(screen.getByTestId("passkey-vault-unlock-setup")).toBeTruthy();
+    expect(screen.getByTestId("portable-passkey-vault-setup")).toBeTruthy();
     expect(screen.queryByText(/set up your vault/i)).toBeNull();
   });
 

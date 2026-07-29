@@ -19,10 +19,11 @@ import { VaultStatusPrompt } from "@/features/vault/vault-status-prompt";
 import { useVaultSettings } from "@/features/notes/use-vault-settings";
 import type { VaultUnlockBehavior } from "@/lib/crypto-client/vault-settings";
 import { applyUnlockBehavior } from "@/features/notes/eager-decrypt-notes";
-import { PasskeyVaultUnlockSetup } from "@/features/passkey/passkey-vault-unlock-setup";
+import { PortablePasskeyVaultSetup } from "@/features/passkey/portable-passkey-vault-setup";
 import { VAULT_PASSKEY_SECTION_INTRO } from "@/lib/passkey/vault-passkey-availability-messages";
 import { StorageUsageDisplay } from "@/components/notes/storage-usage-display";
 import { useStorageUsage } from "@/features/notes/use-storage-usage";
+import { useApplicationState } from "@/components/application-state-provider";
 
 const OPTIONS: Array<{
   value: VaultUnlockBehavior;
@@ -68,6 +69,7 @@ function VaultAutoLockSettings() {
 }
 
 export default function VaultSettingsPage() {
+  const application = useApplicationState();
   const vault = useRequireVault();
   const vaultClient = useVaultClientStatus();
   const userId = vault.status === "ready" ? vault.userId : null;
@@ -191,7 +193,12 @@ export default function VaultSettingsPage() {
             <h2 className="font-medium">Passkey vault unlock</h2>
             <p className="text-sm text-[var(--muted)]">{VAULT_PASSKEY_SECTION_INTRO}</p>
             {userId && (
-              <PasskeyVaultUnlockSetup userId={userId} vaultUnlocked={vaultUnlocked} />
+              <PortablePasskeyVaultSetup
+                userId={userId}
+                vaultUnlocked={vaultUnlocked}
+                enabled={application.features.portableVaultBroker.enabled}
+                brokerUrl={application.features.portableVaultBroker.brokerUrl}
+              />
             )}
           </Card>
 

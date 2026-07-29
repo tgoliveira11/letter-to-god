@@ -8,7 +8,7 @@
 |-------|-------|
 | **Status** | Draft — P1 beta gate |
 | **Scope** | SelahKeep MVP (web) — encrypted notes in a private vault |
-| **Related docs** | [TDR](./TDR_LTG_Vault_MVP.md), [ADR-005](./ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md), [ADR-006](./archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md), [SECURITY.md](../SECURITY.md) |
+| **Related docs** | [TDR](./TDR_LTG_Vault_MVP.md), [ADR-005](./ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md), [Portable passkeys](./PORTABLE_PASSKEY_VAULT.md), [SECURITY.md](../SECURITY.md) |
 | **Audience** | Engineering, security review, product, legal/privacy |
 
 ## Security Architecture Summary
@@ -32,14 +32,14 @@ SelahKeep uses **client-side encryption**. Note title, body, categories, and tag
 | Rate limiting | `RATE_LIMIT_STORE=postgres` in production (PostgreSQL adapter); in-memory for local dev |
 | Vault auto-lock | 15-minute inactivity timeout (`VAULT_INACTIVITY_MS`) |
 | Autosave | **Disabled for MVP** — no autosave implementation; plaintext autosave forbidden |
-| Vault unlock methods | Password, recovery phrase, passkey PRF only (`docs/TRUSTED_DEVICES_REMOVAL.md`) |
+| Vault unlock methods | Password, recovery phrase, portable passkey; PRF envelopes are pre-cutover compatibility reads only |
 | IndexedDB | Legacy trusted-device stores purged on DB v3 upgrade; no vault unlock material persisted |
 | CSP | Nonce-based, production `script-src 'self' 'nonce' 'strict-dynamic' 'wasm-unsafe-eval'`; `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`, `worker-src 'self' blob:`; no third-party **scripts**. `connect-src` is `'self'` plus the (self-hostable) on-device voice model host(s) only — see `src/lib/security/content-security-policy.ts` |
 | Transport / headers | `Strict-Transport-Security` (HSTS, 2y, preload), `Permissions-Policy` (`microphone=(self)`, camera/geolocation/payment/usb off), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` — `next.config.ts` |
 | Note version history | Immutable encrypted snapshots in `note_versions`; client-encrypted under the note's Note Key, AAD-bound to a unique `versionId`; retention-pruned server-side on row counts only; cascade-deletes with the note (`docs/TDR_Note_Version_History.md`) |
 | Voice notes | On-device transcription (Whisper/transformers.js in a Web Worker); microphone audio and transcript never leave the device; only model weights are fetched (self-hostable); guard test `voice-no-content-egress.test.ts` (`docs/TDR_Local_Voice_Notes.md`) |
 | Account 2FA (TOTP) | Optional sign-in protection for email/password, OAuth, and passkey sign-in; secrets encrypted at rest (`TWO_FACTOR_SECRET_ENCRYPTION_KEY`); backup codes hashed; partial sessions never run the vault hook; separate from vault crypto |
-| Passkey account sign-in | WebAuthn `login` challenges; issues `login-token` session; vault unlock only with PRF envelope client-side; sign-in-only passkeys must not be shown as vault recovery |
+| Passkey account sign-in | WebAuthn `login` challenges issue an account session only. Portable vault operations require a later exact-credential, UV-required, single-use grant; sign-in-only passkeys must not be shown as vault recovery |
 | Email verification & password reset | Hashed opaque tokens in `account_tokens`; single-use atomic consumption; generic forgot-password response; rate limits; no vault key or letter content in emails; password reset/change does not unlock vault |
 | Email delivery (SMTP) | Nodemailer SMTP relay; console provider dev-only; SMTP logs domain/subject only; credentials in env; Mailpit for local capture; production must not use `EMAIL_PROVIDER=console` |
 | Session invalidation on password change | `password_updated_at` compared to JWT `iat`; sessions issued before update invalidated |

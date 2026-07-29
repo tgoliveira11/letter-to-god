@@ -10,13 +10,14 @@ Phases 0–5 of the MVP are **complete**. The active implementation domain is **
 
 | Document | Purpose |
 |----------|---------|
-| [`TDR_LTG_Vault_MVP.md`](./TDR_LTG_Vault_MVP.md) | Product and architecture direction |
+| [`TDR_LTG_Vault_MVP.md`](./TDR_LTG_Vault_MVP.md) | Foundational product direction; implementation/passkey sections are historical |
 | [`TDR_DETERMINISTIC_APPLICATION_STATE.md`](./TDR_DETERMINISTIC_APPLICATION_STATE.md) | Server bootstrap, owner boundaries, vault leases, async ownership, and extraction decision |
+| [`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md) | Current portable passkey broker architecture, deployment order, and cleanup runbook |
 | [`TDR_Note_Version_History.md`](./TDR_Note_Version_History.md) | Encrypted note version history + GitHub-style compare |
 | [`TDR_Local_Voice_Notes.md`](./TDR_Local_Voice_Notes.md) | On-device voice-to-text note creation (EN/PT/ES) |
 | [`LTG_VAULT_IMPLEMENTATION_PLAN.md`](./LTG_VAULT_IMPLEMENTATION_PLAN.md) | Phased engineering plan (completed) |
 | [`ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md`](./ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md) | Vault crypto, note keys, recovery phrase |
-| `@tgoliveira/vault-core` package docs | **Single source of truth for vault + passkey PRF unlock** — `README.md`, `docs/IMPLEMENTATION_GUIDE.md`, `PASSKEY_PRF_ENVELOPES.md` |
+| `@tgoliveira/vault-core` package docs | Crypto source of truth, including `docs/PORTABLE_PASSKEY_BROKER.md`; legacy PRF docs are compatibility-only |
 | [`VAULT_CORE_1_6_ADOPTION.md`](./VAULT_CORE_1_6_ADOPTION.md) | SelahKeep-specific vault-core 1.6.1 and secure-auth 0.8.0 integration contract |
 | [`LTG_VAULT_MVP_ACCEPTANCE_CHECKLIST.md`](./LTG_VAULT_MVP_ACCEPTANCE_CHECKLIST.md) | MVP acceptance traceability |
 | [`UI_UX_DIRECTION.md`](./UI_UX_DIRECTION.md) | Purple SelahKeep UI tone & direction |
@@ -64,8 +65,8 @@ Phases 0–5 of the MVP are **complete**. The active implementation domain is **
 
 ## Passkey vault unlock
 
-Passkey PRF vault-unlock behavior is owned by the `@tgoliveira/vault-core` package
-(`README.md`, `docs/IMPLEMENTATION_GUIDE.md`, `PASSKEY_PRF_ENVELOPES.md`). The
+Portable passkey unlock is described in [`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md)
+and uses the vault-core broker contract. Passkey PRF remains a temporary legacy read path. The
 app-side passkey docs (ADR-006 and the PASSKEY_* audits/fix records) were archived
 under [`archive/`](./archive/) on 2026-07-03 because they described a ceremony layer
 that diverged from vault-core; see [`archive/README.md`](./archive/README.md).
@@ -73,6 +74,6 @@ that diverged from vault-core; see [`archive/README.md`](./archive/README.md).
 ## Archived / superseded
 
 Superseded letters-era ADRs, migration reports, and one-off implementation audits
-were removed from or archived in the repo. Use ADR-005, the TDR above, and the
-vault-core package docs for current vault + passkey guidance. Historical passkey
+were removed from or archived in the repo. Use ADR-005 for non-passkey crypto and
+`PORTABLE_PASSKEY_VAULT.md` plus vault-core package docs for current passkey guidance. Historical passkey
 docs live under [`docs/archive/`](./archive/).

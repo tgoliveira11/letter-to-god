@@ -59,14 +59,20 @@ export function VaultSecurityReview({ serverStatus }: VaultSecurityReviewProps) 
   const [drillMessage, setDrillMessage] = useState<string | null>(null);
   const [drillError, setDrillError] = useState<string | null>(null);
 
+  const hasPortablePasskey =
+    serverStatus.availableUnlockMethods?.portablePasskey === true ||
+    serverStatus.hasPortablePasskey === true;
   const hasPasskeyEnvelope =
     serverStatus.availableUnlockMethods?.passkey === true || serverStatus.hasPasskey === true;
   const passkeyDisplayStatus = derivePasskeyVaultUnlockDisplayStatus(
     hasPasskeyEnvelope,
-    prfEnvironment?.capabilityProbe ?? null,
+    hasPortablePasskey ? "supported" : (prfEnvironment?.capabilityProbe ?? null),
     {
       managementBlocked: Boolean(
-        prfEnvironment && hasPasskeyEnvelope && isPasskeyPrfManagementBlocked(prfEnvironment)
+        !hasPortablePasskey &&
+          prfEnvironment &&
+          hasPasskeyEnvelope &&
+          isPasskeyPrfManagementBlocked(prfEnvironment)
       ),
     }
   );
@@ -91,13 +97,16 @@ export function VaultSecurityReview({ serverStatus }: VaultSecurityReviewProps) 
 
   useEffect(() => {
     let cancelled = false;
+    if (hasPortablePasskey) {
+      return;
+    }
     void probePasskeyPrfEnvironmentAsync().then((snapshot) => {
       if (!cancelled) setPrfEnvironment(snapshot);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hasPortablePasskey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -277,10 +286,18 @@ export function VaultSecurityReview({ serverStatus }: VaultSecurityReviewProps) 
         <h2 className="font-medium">Passkey vault unlock compatibility</h2>
         <p className="text-sm text-[var(--muted)]">{VAULT_PASSKEY_SECTION_INTRO}</p>
         <p className="text-sm text-[var(--muted)]">
-          Vault passkey unlock requires WebAuthn PRF. Some browsers support passkeys for account
-          sign-in but do not report PRF support for vault unlock.
+          Portable unlock uses an explicit passkey authorization and a direct connection to the
+          trusted vault broker. WebAuthn PRF is required only for legacy pre-cutover envelopes.
         </p>
-        {prfEnvironment && (
+        {hasPortablePasskey && (
+          <dl className="space-y-2 text-sm">
+            <div>
+              <dt className="font-medium">Portable passkey vault unlock</dt>
+              <dd className="text-[var(--muted)]">Configured</dd>
+            </div>
+          </dl>
+        )}
+        {!hasPortablePasskey && prfEnvironment && (
           <dl className="space-y-2 text-sm">
             <div>
               <dt className="font-medium">Passkeys for sign-in</dt>

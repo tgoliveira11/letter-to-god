@@ -15,7 +15,8 @@ export function toVaultServerStatusSnapshot(
     configured: vaultStatus.setupComplete ?? vaultStatus.hasVault ?? false,
     hasPasskeyPrfEnvelope:
       vaultStatus.availableUnlockMethods?.passkey ?? vaultStatus.hasPasskey ?? false,
-    passkeyUnlockAvailableOnThisDevice: vaultStatus.passkeyUnlockAvailableOnThisDevice,
+    passkeyUnlockAvailableOnThisDevice:
+      vaultStatus.hasPortablePasskey || vaultStatus.passkeyUnlockAvailableOnThisDevice,
   };
 }
 

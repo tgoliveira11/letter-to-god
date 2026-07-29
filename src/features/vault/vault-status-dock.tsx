@@ -36,12 +36,14 @@ export function VaultStatusDock() {
     loading,
     error,
     unlockFromPasskey,
+    unlockFromPortablePasskey,
     unlockFromVaultPassword,
   } = useVault();
   const serverStatus = vaultClient.status === "ready" ? vaultClient.serverStatus : null;
+  const hasPortablePasskey = serverStatus?.hasPortablePasskey === true;
   const passkeyAvailability = useVaultDockPasskeyAvailable(serverStatus);
   const { refresh: refreshPasskeyOptions } = useVaultPasskeyUnlockPrefetch(
-    passkeyAvailability.showPasskey
+    passkeyAvailability.showPasskey && !hasPortablePasskey
   );
   /** Survives VaultDockQuickUnlock remounts (e.g. React Strict Mode, page re-render on unlock). */
   const passkeyUnlockInFlightRef = useRef(false);
@@ -54,13 +56,22 @@ export function VaultStatusDock() {
       if (!passkeyAvailability.showPasskey || passkeyUnlockInFlightRef.current) return;
       passkeyUnlockInFlightRef.current = true;
       try {
-        await unlockFromPasskey(prefetch?.options, prefetch?.credentialId);
+        if (hasPortablePasskey) {
+          await unlockFromPortablePasskey();
+        } else {
+          await unlockFromPasskey(prefetch?.options, prefetch?.credentialId);
+        }
         collapse();
       } finally {
         passkeyUnlockInFlightRef.current = false;
       }
     },
-    [passkeyAvailability.showPasskey, unlockFromPasskey]
+    [
+      hasPortablePasskey,
+      passkeyAvailability.showPasskey,
+      unlockFromPasskey,
+      unlockFromPortablePasskey,
+    ]
   );
 
   const handleDockPasskeyUnlockFailed = useCallback(
@@ -73,7 +84,7 @@ export function VaultStatusDock() {
 
   if (!application.ownerId) return null;
   if (vaultClient.status !== "ready") return null;
-  if (capabilities.passkeyPrf.status === "checking") return null;
+  if (!hasPortablePasskey && capabilities.passkeyPrf.status === "checking") return null;
   if (isVaultFullUnlockPage(pathname)) return null;
 
   const { clientStatus } = vaultClient;
@@ -87,7 +98,7 @@ export function VaultStatusDock() {
       visible
       emergencyModeEnabled={false}
       serverStatus={snapshot}
-      prfSupported={capabilities.passkeyPrf.status === "supported"}
+      prfSupported={hasPortablePasskey || capabilities.passkeyPrf.status === "supported"}
       pathname={pathname}
       unlockPath={UNLOCK_PATH}
       buildUnlockHref={(path) => buildVaultUnlockHref(path ?? returnPath)}
@@ -113,6 +124,7 @@ export function VaultStatusDock() {
           error={dockError}
           serverStatus={snapshot}
           passkeyReady={passkeyAvailability.showPasskey}
+          portablePasskey={hasPortablePasskey}
           unlockRateLimiter={rateLimiter}
           rateLimitScopeKey={rateLimitScopeKey}
           refreshPasskeyOptions={refreshPasskeyOptions}

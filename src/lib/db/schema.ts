@@ -10,6 +10,7 @@ export {
   userTwoFactorSessionUpgrades,
   userTwoFactorSettings,
   webauthnChallenges,
+  webauthnBrokerOperations,
   adminConfigOverrides,
   apiKeys,
   inviteCodes,
@@ -20,7 +21,9 @@ export {
 
 export {
   passkeyCredentials,
+  passkeyCleanupEpochs,
   vaultPasskeyDeviceBindings,
+  vaultPortableBrokerEnvelopes,
   userVaults,
   vaultEnvelopes,
   notes,
@@ -39,6 +42,8 @@ export {
   type NoteKanbanVersion,
   type VaultEnvelope,
   type VaultPasskeyDeviceBinding,
+  type VaultPortableBrokerEnvelope,
+  type PasskeyCleanupEpoch,
 } from "./app-schema";
 
 import { users } from "@tgoliveira/secure-auth/drizzle/schema";

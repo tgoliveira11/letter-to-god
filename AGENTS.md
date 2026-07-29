@@ -6,11 +6,12 @@
 
 Read and follow these documents before implementing:
 
-- `docs/TDR_LTG_Vault_MVP.md` — **SelahKeep product/architecture (primary)**
+- `docs/TDR_LTG_Vault_MVP.md` — foundational product direction; its passkey sections are historical
+- `docs/PORTABLE_PASSKEY_VAULT.md` — **current passkey vault architecture and rollout source of truth**
 - `docs/TDR_DETERMINISTIC_APPLICATION_STATE.md` — bootstrap, account boundary, vault lease, and async ownership contract
-- `docs/LTG_VAULT_IMPLEMENTATION_PLAN.md` — phased plan (Phases 0–5 complete)
+- `docs/LTG_VAULT_IMPLEMENTATION_PLAN.md` — historical phased plan (Phases 0–5 complete)
 - `docs/ADR-005_LTG_Vault_Cryptography_Argon2id_Recovery_Phrase_Note_Keys.md` — vault crypto, note keys, recovery phrase
-- `docs/archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md` — passkey PRF vault unlock
+- `docs/archive/ADR-006_LTG_Vault_Passkey_PRF_Unlock.md` — superseded legacy PRF design; compatibility reads only
 - `docs/MODULE_BOUNDARIES.md`
 - `docs/AUTH_RESET_TO_SECURE_AUTH.md` — auth boundary (`@tgoliveira/secure-auth`)
 - `docs/README.md` — documentation index
@@ -92,7 +93,7 @@ Keep docs accurate with the code. **Do not merge behavior changes without updati
 |------------------|---------|
 | Setup, commands, ports, env vars | `README.md` |
 | Layers, directories, data flow | `ARCHITECTURE.md`, `docs/MODULE_BOUNDARIES.md` |
-| Crypto, vault, passkeys, recovery | `SECURITY.md`, ADR-005/006 |
+| Crypto, vault, passkeys, recovery | `SECURITY.md`, ADR-005, `docs/PORTABLE_PASSKEY_VAULT.md` |
 | Agent workflow, testing, boundaries | `AGENTS.md`, `.cursor/rules/*.md`, `docs/contributing.md` |
 | Navigation / branding | `docs/LOGGED_IN_NAVIGATION_AUDIT.md`, `docs/UI_UX_DIRECTION.md` |
 | Visual language / tokens / components / dark mode | `docs/DESIGN_SYSTEM.md`, `docs/design/` |

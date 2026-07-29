@@ -31,9 +31,16 @@ import {
   AUTHENTICATION_CONFIRMED_PRF_CEREMONY,
   isAuthenticationConfirmedPasskeyVariant,
 } from "@/lib/passkey/passkey-envelope-variant-metadata";
+import { isLegacyPasskeyPrfEnrollmentEnabled } from "@/lib/env/portable-vault-broker";
 
 const rpID = getWebAuthnRpId();
 const origins = getWebAuthnOrigins();
+
+function assertLegacyEnrollmentEnabled() {
+  if (!isLegacyPasskeyPrfEnrollmentEnabled()) {
+    throw new NotFoundError("Legacy passkey PRF enrollment is disabled");
+  }
+}
 
 /** App policy: all active variants must fit in vault-core's bounded candidate set. */
 export const MAX_ACTIVE_PASSKEY_ENVELOPE_VARIANTS = 5;
@@ -163,6 +170,7 @@ export const passkeyVaultEnvelopeService = {
   },
 
   async getVaultUnlockAuthOptions(userId: string, credentialDbId: string, ip?: string) {
+    assertLegacyEnrollmentEnabled();
     return getVaultUnlockAuthOptions(userId, credentialDbId, ip);
   },
 
@@ -209,6 +217,7 @@ export const passkeyVaultEnvelopeService = {
     credentialDbId: string,
     response: AuthenticationResponseJSON
   ) {
+    assertLegacyEnrollmentEnabled();
     const { credential } = await verifyPasskeyAuthentication(userId, credentialDbId, response);
     const enrollmentProof = await issueProof(
       userId,
@@ -228,6 +237,7 @@ export const passkeyVaultEnvelopeService = {
     encryptedVaultKey: EncryptedPayload,
     options?: { prfSupported?: boolean | null }
   ) {
+    assertLegacyEnrollmentEnabled();
     assertVaultKeyAad(userId, encryptedVaultKey, SELAHKEEP_VAULT_PROFILE.aadContextEnvelope);
     const credential = await passkeyRepository.findByIdForUser(credentialDbId, userId);
     if (!credential) throw new NotFoundError("Passkey not found");

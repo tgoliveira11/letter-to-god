@@ -285,9 +285,9 @@ describe("PasskeyVaultUnlockSetup", () => {
     expect(screen.queryByText(/set up account passkey first/i)).toBeNull();
   });
 
-  it("4. explains account passkeys and vault passkeys are independent", async () => {
+  it("4. explains account authentication and vault unlock are independent", async () => {
     render(<PasskeyVaultUnlockSetup userId={USER_ID} vaultUnlocked />);
-    expect(await screen.findByText(/account passkeys and vault passkeys are independent/i)).toBeTruthy();
+    expect(await screen.findByText(/account authentication and vault unlock are independent/i)).toBeTruthy();
   });
 
   it("5. shows setup when vault is unlocked and PRF is available without account passkey", async () => {

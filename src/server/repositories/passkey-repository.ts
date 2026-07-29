@@ -58,8 +58,8 @@ export const passkeyRepository = {
     return cred;
   },
 
-  async findByIdForUser(id: string, userId: string) {
-    const [cred] = await db
+  async findByIdForUser(id: string, userId: string, client: DbClient = db) {
+    const [cred] = await client
       .select()
       .from(passkeyCredentials)
       .where(

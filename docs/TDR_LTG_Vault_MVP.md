@@ -2,11 +2,18 @@
 
 > Former working name: LTG Vault. Current product name: SelahKeep.
 
+> **Current-surface notice (2026-07-29):** This TDR remains the foundational product record, but
+> its package versions, implementation inventory, and PRF passkey design are historical. Portable
+> passkey unlock through the direct browser-to-broker flow supersedes those passkey sections. Use
+> [`PORTABLE_PASSKEY_VAULT.md`](./PORTABLE_PASSKEY_VAULT.md), `SECURITY.md`, and
+> `docs/CURRENT_PRODUCT_SURFACE.md` for current implementation guidance. PRF envelopes are
+> compatibility-only reads and must not be used for new enrollment.
+
 ## 1. Status
 
 | Field | Value |
 |-------|--------|
-| **Status** | Proposed |
+| **Status** | Foundational record; implementation details partially superseded |
 | **Repository** | [https://github.com/tgoliveira11/selahkeep](https://github.com/tgoliveira11/selahkeep) |
 | **Product name** | SelahKeep |
 | **Product direction** | Encrypted private vault for prayers, reflections, and personal notes |
@@ -761,7 +768,7 @@ This preserves emotional/spiritual identity while making the product more useful
 | Document | Role |
 |----------|------|
 | `docs/ADR-005_*` | Active vault crypto, note keys, recovery phrase |
-| `docs/ADR-006_*` | Active passkey PRF vault unlock |
+| `docs/ADR-006_*` | Superseded legacy PRF vault unlock record |
 | `docs/AUTH_RESET_TO_SECURE_AUTH.md` | Auth boundary with secure-auth |
 | `docs/LTG_VAULT_IMPLEMENTATION_PLAN.md` | Engineering phased plan (Phases 0–5 complete) |
 | `docs/README.md` | Documentation index |

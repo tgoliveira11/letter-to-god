@@ -111,6 +111,70 @@ export const vaultPasskeyDeviceBindings = pgTable(
   ]
 );
 
+/**
+ * App-owned routing metadata for an envelope held by the portable vault broker.
+ * The PUK and encrypted UVK are never stored here. Opaque AAD UUIDs deliberately
+ * have no relationship to the account id or WebAuthn credential id.
+ */
+export const vaultPortableBrokerEnvelopes = pgTable(
+  "vault_portable_broker_envelopes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    passkeyCredentialId: uuid("passkey_credential_id")
+      .notNull()
+      .references(() => passkeyCredentials.id, { onDelete: "restrict" }),
+    brokerEnvelopeId: uuid("broker_envelope_id").unique(),
+    opaqueAadUserId: uuid("opaque_aad_user_id").notNull(),
+    opaqueAadResourceId: uuid("opaque_aad_resource_id").notNull(),
+    enrollmentRequestId: uuid("enrollment_request_id"),
+    state: text("state").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "vault_portable_broker_envelopes_state_check",
+      sql`${table.state} IN ('pending', 'active', 'revoked')`
+    ),
+    index("idx_vault_portable_broker_envelopes_user_state").on(table.userId, table.state),
+    index("idx_vault_portable_broker_envelopes_credential").on(table.passkeyCredentialId),
+    uniqueIndex("uq_vault_portable_broker_envelopes_current_credential")
+      .on(table.passkeyCredentialId)
+      .where(sql`${table.state} IN ('pending', 'active')`),
+  ]
+);
+
+/**
+ * Operational boundary separating the audited legacy snapshot from passkeys
+ * enrolled after the portable-broker cutover. Cleanup tooling targets only rows
+ * at or before `cutoffAt` and never infers scope from a later live count.
+ */
+export const passkeyCleanupEpochs = pgTable(
+  "passkey_cleanup_epochs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cutoffAt: timestamp("cutoff_at", { withTimezone: true }).notNull(),
+    status: text("status").notNull().default("planned"),
+    expectedCounts: jsonb("expected_counts").notNull(),
+    actualCounts: jsonb("actual_counts"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    cleanupCompletedAt: timestamp("cleanup_completed_at", { withTimezone: true }),
+    enrollmentReopenedAt: timestamp("enrollment_reopened_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "passkey_cleanup_epochs_status_check",
+      sql`${table.status} IN ('planned', 'completed')`
+    ),
+    index("idx_passkey_cleanup_epochs_cutoff").on(table.cutoffAt),
+  ]
+);
+
 export const notes = pgTable(
   "notes",
   {
@@ -312,3 +376,5 @@ export type NoteKanbanBoard = typeof noteKanbanBoards.$inferSelect;
 export type NoteKanbanVersion = typeof noteKanbanVersions.$inferSelect;
 export type VaultEnvelope = typeof vaultEnvelopes.$inferSelect;
 export type VaultPasskeyDeviceBinding = typeof vaultPasskeyDeviceBindings.$inferSelect;
+export type VaultPortableBrokerEnvelope = typeof vaultPortableBrokerEnvelopes.$inferSelect;
+export type PasskeyCleanupEpoch = typeof passkeyCleanupEpochs.$inferSelect;

@@ -8,7 +8,13 @@ import { getVaultSecurityEventLabel } from "@/lib/vault/vault-security-event-typ
 
 const CLIENT_EVENT_SET = new Set<string>(CLIENT_RECORDABLE_VAULT_SECURITY_EVENTS);
 
-const ALLOWED_CLIENT_METHODS = new Set(["password", "recovery_phrase", "passkey", "passkey_prf"]);
+const ALLOWED_CLIENT_METHODS = new Set([
+  "password",
+  "recovery_phrase",
+  "passkey",
+  "passkey_prf",
+  "portable_passkey",
+]);
 
 export type VaultSecurityEventView = {
   id: string;

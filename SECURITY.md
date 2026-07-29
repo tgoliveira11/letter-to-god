@@ -38,28 +38,30 @@ The normative state and ownership model is [`docs/TDR_DETERMINISTIC_APPLICATION_
 - **Legacy recovery code KDF:** Argon2id preferred; PBKDF2-SHA-256 fallback (600k iterations) with versioned `kdf-v1` metadata — legacy `recovery_code` envelopes only
 - Recovery codes: ≥128 bits entropy (project-specific wordlist, not BIP39; currently 17 words from 252 unique words ≈ 135.6 bits); uniform word selection + rejection sampling; shown only at generation/regeneration; never stored plaintext
 
-## Vault Unlocking (ADR-005 / ADR-006)
+## Vault unlocking (ADR-005 and portable broker)
 
 All unlock, setup, recovery, and passkey mutations begin a vault-core owner operation. Successful unlock installs a lease-bound epoch; lock, logout, or account replacement invalidates it. Private consumers assert both their last-request-wins ownership token and the current lease after asynchronous work and before committing plaintext-derived state or ciphertext writes.
 
-Supported unlock methods: **vault password**, **recovery phrase**, **passkey PRF** (`passkey_authorized_device` envelope). Legacy `recovery_code` envelopes remain for older vaults.
+Supported unlock methods: **vault password**, **recovery phrase**, and **portable passkey** through
+the trusted broker. Legacy `recovery_code` and passkey PRF envelopes remain read-only compatibility
+paths during cutover.
 
 ### Account passkeys and vault passkeys
 
-Account passkeys and vault passkeys are **independent**.
+The same synced WebAuthn credential may authorize both domains, but account login and vault unlock
+are **independent ceremonies**. Login never creates a broker grant or installs a UVK. Portable vault
+authorization requires a final account session (including TOTP), an exact-credential assertion with
+user verification, and a short-lived single-use grant. The browser calls the broker directly.
 
-- An account passkey signs the user in to SelahKeep (`@tgoliveira/secure-auth`).
-- A vault passkey unlocks the encrypted vault using WebAuthn PRF after the user is signed in.
-- Users may configure vault passkey unlock without first configuring account passkey sign-in (vault must be unlocked; browser/provider must support PRF).
-- Signing in with an account passkey never unlocks the vault by itself.
-- Vault-only setup first creates `signInEnabled: false`, `vaultUnlockEnabled: false`. Vault capability is enabled only after a separate authentication ceremony, browser-local PRF confirmation, encrypted envelope persistence, local candidate unwrap, and binding persistence.
-- Vault unlock WebAuthn: `POST /api/passkeys/authenticate` with `purpose: "vault_unlock"` includes only active vault credentials and preserves persisted transports. A missing binding uses an explicit allow-list; a stale/inactive binding fails closed with 409 and is cleared. Vault-only disable revokes the credential; dual-purpose disable clears only vault capability.
-- The full unlock page prefetches explicit allow-list options and consumes that snapshot directly from the passkey button's user gesture. It does not require the quick-unlock binding and does not insert a network refresh before WebAuthn when prefetched options are ready (required for reliable Safari/PWA activation).
-- Bulk reset from unlocked `/vault/settings` uses `DELETE /api/passkeys/vault-unlock`: it atomically revokes every vault-only credential and passkey envelope, removes all browser bindings, clears vault capability on dual-purpose credentials, and preserves account sign-in capability. The product layer never deletes account passkeys through this operation.
+The broker holds a PUK encrypted by its KEK and the vault-core UVK envelope. Compromise of the
+running broker plus its database and KEK can recover this material, so the design is not
+zero-knowledge against the broker. SelahKeep's app server still cannot decrypt the vault. Unlock
+uses a fresh non-extractable one-use P-256 browser key, and session installation occurs only after
+the server verifies and consumes the signed completion receipt.
 
 - Passkeys must not be used as raw encryption keys
 - Account session alone never unlocks the vault
-- Passkey PRF unlock does not cache a local device-secret envelope
+- Portable unlock never caches a PUK, grant, receipt, private ephemeral key, or UVK in browser storage
 - On load, `purgeTrustedDeviceIdb()` removes legacy `device_secrets` / `vault_envelopes` IndexedDB stores (trusted devices removed — see `docs/TRUSTED_DEVICES_REMOVAL.md`)
 
 ## Database transactions
@@ -195,11 +197,11 @@ Plaintext passwords are redacted from logs (`safeLogger`) and blocked from audit
 
 These flows protect **account authentication only**. They do **not** unlock, recover, rotate, or decrypt the private letters vault. User-facing copy states this on reset and change-password screens.
 
-**Account authentication** is implemented by `@tgoliveira/secure-auth@0.8.0` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
+**Account authentication** is implemented by `@tgoliveira/secure-auth@0.10.0` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
 **Admin platform (0.4.1+)** — when `AUTH_ADMIN_ENABLED=true`, `/admin` and `/api/auth/admin/*` are served by the package. Unauthenticated users are redirected to login by `src/proxy.ts`; **role checks (`admin` vs `user`) are enforced in package API handlers**, not in the proxy. Bootstrap: set `ADMIN_BOOTSTRAP_EMAIL` to promote the first admin when none exists. This admin surface manages **accounts only** — it does not access vault keys or decrypted note content. App-specific `/api/admin/users/[id]` remains separate (self-summary only).
 
-**secure-auth 0.8.0 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
+**secure-auth 0.10.0 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
 
 **Package API security (0.1.21+)** — enforced inside `@tgoliveira/secure-auth` route handlers, not only in app middleware:
 
@@ -286,14 +288,18 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 - Passkey and email/password sign-in both complete TOTP when account 2FA is enabled
 - OAuth + TOTP behavior is unchanged (partial session until `/login/2fa`)
 - Successful passkey login issues the same one-time `login-token` session as post-TOTP credentials login
-- A server-only secure-auth callback receives the resolved user and credential allow-list and uses vault-core to add the public per-user PRF salt only when that allow-list contains a dual-capability credential. The public options response does not expose the user ID; the app route remains a pure package delegate.
-- A browser without a local passkey hint must supply the account email before the passkey ceremony. The user-specific salt is never guessed or broadened to a cross-account allow-list.
-- secure-auth sanitizes the assertion before verification; PRF output remains browser-only. Only after a final fully authenticated session exists may the optional login hook load exact encrypted candidates, unwrap locally, and install the vault session.
-- An account-only passkey completes login without vault work. For a vault-enabled passkey, missing PRF or `no_match` keeps the account signed in but returns a typed action that routes to explicit `/vault/unlock`; malformed/cryptographic integration state fails generically without rolling back account authentication.
-- When TOTP is pending, secure-auth discards the initial ceremony's extension results and does not invoke the vault hook from the partial session or TOTP completion. Vault unlock remains a later explicit ceremony.
+- Account login never installs a vault key or issues a portable-vault grant. After a fully authenticated session exists, an explicit UV-required assertion for the exact credential may authorize a single-use broker operation.
+- A browser without a local passkey hint must supply the account email before the login ceremony. Credential discovery is never broadened into a cross-account allow-list.
+- secure-auth sanitizes assertions before server verification. Legacy PRF extension output remains browser-only, while portable broker grants and receipts contain no UVK, PUK, or decrypted vault payload.
+- An account-only passkey completes login without vault work. A passkey may separately be enrolled for portable vault unlock without coupling the account session and vault session lifecycles.
+- When TOTP is pending, no portable-vault grant can be issued. Vault unlock remains a later explicit, fully authenticated operation.
 - Account passkey management: `GET /api/account/passkeys`, register/remove (package), optional vault unlock enable (`enable-vault-unlock`), status/revoke (`GET/DELETE .../vault-unlock`)
 
-## Passkey vault unlock (PRF)
+## Legacy passkey PRF compatibility
+
+Portable broker unlock is canonical; see [`docs/PORTABLE_PASSKEY_VAULT.md`](./docs/PORTABLE_PASSKEY_VAULT.md).
+The statements below apply only while reading pre-cutover ciphertext. New PRF enrollment is disabled
+by default whenever portable mode is enabled.
 
 - Vault unlock authenticate purpose filters to `vaultUnlockEnabled` credentials only; dual-passkey users (account + vault) are supported
 - Vault unlock replays stored WebAuthn `transports` and keeps the matching credential descriptor intact; credential separation is provided by the vault-specific user handle, not by forcing an inaccurate transport (see `docs/archive/PASSKEY_TOUCH_ID_QR_PROMPT_FIX.md`)
@@ -306,7 +312,8 @@ Safe audit events only (no plaintext letters, recovery codes, keys, or ciphertex
 - The server returns `verifiedCredentialId`, an opaque short-lived binding proof, and at most five encrypted candidates for the verified credential. The browser confirms PRF capability against that ID, extracts PRF by credential ID, and runs vault-core candidate unwrap.
 - `selectedEnvelopeVariantId` and binding `lastUsedAt` are persisted only after `status: "matched"`. `no_match`, test, and failed rebind do not mutate routing state; WebAuthn counter and authenticator backup metadata updates are expected verification-side exceptions.
 - Registration PRF output is capability evidence only and never authorizes a durable envelope. The first write requires a sanitized, server-verified authentication assertion for the exact registered credential; PRF bytes remain browser-only.
-- One synced credential may have several active envelope variants and browser bindings. The active variant cap is five and fails closed without eviction. Compatibility repair requires local password/recovery authorization through vault-core 1.6.1 and never trusts the session UVK or a browser binding alone.
+- Historical synced credentials may have several active envelope variants and browser bindings. They
+  are not represented as portable and are removed only by the epoch-scoped cleanup runbook.
 - New writes require `SELAHKEEP_VAULT_PROFILE.aadContextEnvelope`. Legacy ciphertext with missing/null AAD context remains readable while `legacyVaultKeyUnlock` is enabled; arbitrary explicit contexts fail closed because no legacy string allowlist is configured. Disable this fallback only after telemetry/data migration confirms no legacy envelopes remain.
 - If PRF is unavailable, a passkey vault envelope is **not** created and existing variants are **not** revoked
 - PRF diagnostics: `src/lib/passkey/passkey-prf-diagnostics.ts`; audits `docs/archive/PASSKEY_VAULT_UNLOCK_DIAGNOSTIC_AUDIT.md`, `docs/archive/PASSKEY_VAULT_SETUP_AVAILABILITY_AUDIT.md`

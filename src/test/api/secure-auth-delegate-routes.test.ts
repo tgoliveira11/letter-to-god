@@ -20,6 +20,14 @@ const delegateRoutes = [
   ["account passkeys list", () => import("@/app/api/account/passkeys/route")],
   ["account passkeys register", () => import("@/app/api/account/passkeys/register/route")],
   ["account passkeys by id", () => import("@/app/api/account/passkeys/[id]/route")],
+  [
+    "portable vault grant options",
+    () => import("@/app/api/account/passkeys/portable-vault-grants/options/route"),
+  ],
+  [
+    "portable vault grant verify",
+    () => import("@/app/api/account/passkeys/portable-vault-grants/verify/route"),
+  ],
   ["2fa status", () => import("@/app/api/account/2fa/status/route")],
   ["2fa setup start", () => import("@/app/api/account/2fa/setup/start/route")],
   ["2fa setup verify", () => import("@/app/api/account/2fa/setup/verify/route")],

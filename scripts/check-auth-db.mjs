@@ -51,6 +51,7 @@ const requiredTables = [
   "user_two_factor_session_upgrades",
   "user_two_factor_backup_codes",
   "user_preferences",
+  "webauthn_broker_operations",
 ];
 
 const sql = postgres(connectionString, { max: 1 });

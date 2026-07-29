@@ -69,7 +69,9 @@ Credentials login: `login/start` → optional `verify-2fa` → one-time `login-t
 
 ### Passkey account sign-in and management
 
-Passkeys authenticate the account separately from vault decryption. A passkey unlocks private letters only when it has a valid PRF-based vault envelope.
+Passkeys authenticate the account separately from vault decryption. Portable vault access requires
+a dedicated, exact-credential, UV-required broker grant after the account session (and TOTP, when
+configured) is complete. Login never installs a vault key.
 
 | Method | Path | Auth |
 |--------|------|------|
@@ -79,6 +81,12 @@ Passkeys authenticate the account separately from vault decryption. A passkey un
 | `POST` | `/api/account/passkeys/register` | Session |
 | `POST` | `/api/account/passkeys/:id/enable-sign-in` | Session; package-owned exact-credential promotion |
 | `DELETE` | `/api/account/passkeys/:id` | Session |
+| `POST` | `/api/account/passkeys/portable-vault-grants/options` | Fully authenticated session; exact credential and action |
+| `POST` | `/api/account/passkeys/portable-vault-grants/verify` | Fully authenticated session; sanitized WebAuthn assertion |
+| `POST` | `/api/account/passkeys/portable-vault-grants/finalize` | Fully authenticated session; signed broker receipt |
+| `GET` | `/api/vault/portable-passkey` | Fully authenticated session; opaque mappings only |
+| `POST` | `/api/vault/portable-passkey/prepare` | Fully authenticated session; pending mapping + opaque AAD scope |
+| `POST` | `/api/vault/portable-passkey/bind` | Fully authenticated session; stage broker envelope before receipt finalization |
 | `POST` | `/api/account/passkeys/:id/enable-vault-unlock` | Session (actions `options`, `verify`, `persist`; persist requires locally unlocked vault) |
 | `GET` | `/api/account/passkeys/:id/vault-unlock` | Session |
 | `DELETE` | `/api/account/passkeys/:id/vault-unlock` | Session + opaque proof for locally matched variant |
@@ -90,7 +98,12 @@ Passkeys authenticate the account separately from vault decryption. A passkey un
 | `DELETE` | `/api/passkeys/authenticate` | Session; unbind current browser only |
 | `DELETE` | `/api/passkeys` | Legacy alias for bulk vault-passkey removal; never removes account sign-in capability |
 
-Account authentication and vault unlock remain independent security domains, but the same credential may opt into both. `verify` returns the verified credential ID, an opaque short-lived proof, and at most five encrypted envelope candidates. PRF output stays in the browser: clients sanitize WebAuthn responses, confirm PRF against the verified ID, unwrap candidates locally, and call `bind` only after `status: matched`. Missing binding cookies use an explicit credential allow-list; quick unlock requires an exact browser binding. Compatibility repair requires local password/recovery authorization and the server never evicts an active variant implicitly.
+Account authentication and vault unlock remain independent security domains, but the same synced
+credential may opt into both. The browser sends PUK material directly to the trusted broker, never
+to these app routes. Unlock uses a fresh one-use browser key, and the UVK is installed only after
+the completion receipt is finalized. The PRF/candidate/browser-binding routes below this table are
+legacy dual-run compatibility and cannot create new envelopes when portable mode disables legacy
+enrollment.
 
 ### Vault recovery phrase
 

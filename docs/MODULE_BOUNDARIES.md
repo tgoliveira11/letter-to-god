@@ -8,7 +8,7 @@ This project uses a **modular monolith** under `src/modules/`. See also `docs/UT
 
 | Module | Responsibility |
 |--------|----------------|
-| `vault` | User Vault Key, explicit unlock (password, recovery phrase, passkey PRF), recovery code (legacy), passkey PRF envelopes |
+| `vault` | User Vault Key, explicit unlock (password, recovery phrase, portable passkey), recovery code/PRF envelopes (legacy reads) |
 | `notes` | Encrypted note CRUD (metadata, body, per-note keys) |
 | `email` | SMTP/console provider core (account emails via `@tgoliveira/secure-auth`) |
 | `audit` | Audit events, persistence, sanitization |
@@ -28,7 +28,7 @@ account authentication ≠ vault decryption
 account sessions ≠ vault unlock
 TOTP ≠ vault recovery
 password reset ≠ vault recovery
-passkey account login ≠ passkey vault unlock (without PRF envelope)
+passkey account login ≠ portable vault grant ≠ vault session installation
 ```
 
 ## Allowed dependency direction

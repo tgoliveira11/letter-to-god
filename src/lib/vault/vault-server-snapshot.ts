@@ -6,12 +6,14 @@ export function toVaultServerStatusSnapshot(status: VaultStatus): VaultServerSta
   const setupPhase = status.setupPhase ?? deriveSetupPhase(status);
   const configured = setupPhase !== "not_configured";
   const hasPasskeyPrfEnvelope =
+    status.hasPortablePasskey === true ||
     status.availableUnlockMethods?.passkey === true ||
     status.methods?.some((method) => method === "passkey_authorized_device") === true;
 
   return {
     configured,
     hasPasskeyPrfEnvelope,
-    passkeyUnlockAvailableOnThisDevice: status.passkeyUnlockAvailableOnThisDevice,
+    passkeyUnlockAvailableOnThisDevice:
+      status.hasPortablePasskey || status.passkeyUnlockAvailableOnThisDevice,
   };
 }

@@ -52,7 +52,11 @@ export {
   coreSuppressVaultActivity as suppressVaultActivity,
 };
 
-export type VaultUnlockMethod = "password" | "recovery_phrase" | "passkey_prf";
+export type VaultUnlockMethod =
+  | "password"
+  | "recovery_phrase"
+  | "passkey_prf"
+  | "portable_passkey";
 
 export type VaultLockReason = "manual" | "auto_lock" | "logout" | "account_switch" | "error";
 

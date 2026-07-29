@@ -14,6 +14,7 @@ import {
   SELAHKEEP_PREFERENCES_NAMESPACE,
   VAULT_AUTO_LOCK_MINUTES_PREFERENCE,
 } from "@/lib/application-state/preference-keys";
+import { resolvePortableVaultBrokerPublicConfig } from "@/lib/env/portable-vault-broker";
 
 export type AppBootstrapSnapshot = {
   state: "ready";
@@ -25,6 +26,10 @@ export type AppBootstrapSnapshot = {
   adminAccess: boolean;
   features: {
     preferences: boolean;
+    portableVaultBroker: {
+      enabled: boolean;
+      brokerUrl: string;
+    };
   };
 };
 
@@ -60,6 +65,7 @@ export async function resolveAppBootstrap(): Promise<AppBootstrapSnapshot> {
   // authentication boundary is complete.
   const ownerId = isFullyAuthenticatedSession(session) ? (session?.user?.id ?? null) : null;
   const uiConfig = secureAuth.uiConfig;
+  const portableVaultBroker = resolvePortableVaultBrokerPublicConfig();
 
   if (!ownerId) {
     return {
@@ -70,7 +76,10 @@ export async function resolveAppBootstrap(): Promise<AppBootstrapSnapshot> {
       vaultStatus: null,
       vaultAutoLockUserMinutes: null,
       adminAccess: false,
-      features: { preferences: uiConfig.preferences?.enabled === true },
+      features: {
+        preferences: uiConfig.preferences?.enabled === true,
+        portableVaultBroker,
+      },
     };
   }
 
@@ -98,6 +107,9 @@ export async function resolveAppBootstrap(): Promise<AppBootstrapSnapshot> {
     vaultAutoLockUserMinutes:
       preferenceResult.status === "fulfilled" ? preferenceResult.value : "unavailable",
     adminAccess: isPlatformAdminUser(accountResult.value, process.env),
-    features: { preferences: uiConfig.preferences?.enabled === true },
+    features: {
+      preferences: uiConfig.preferences?.enabled === true,
+      portableVaultBroker,
+    },
   };
 }
