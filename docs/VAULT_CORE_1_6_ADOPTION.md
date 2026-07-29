@@ -5,12 +5,10 @@ published `@tgoliveira/vault-core` documentation.
 
 ## Package gate and migration
 
-- Current published pins: `@tgoliveira/vault-core@1.6.1` and
-  `@tgoliveira/secure-auth@0.8.0`.
-- The source integration is validated against the release candidates for
-  `@tgoliveira/vault-core@1.7.0` and `@tgoliveira/secure-auth@0.9.0`. Do not merge it with the old
-  lockfile: update both exact pins and regenerate the lockfile only after both versions are
-  published.
+- Current published pins: `@tgoliveira/vault-core@1.7.0` and
+  `@tgoliveira/secure-auth@0.9.1`.
+- The lockfile resolves both exact versions from the public npm registry. Local tarballs and
+  unpublished release candidates are not valid production inputs.
 - `0021_vault_passkey_multi_device_variants.sql` remains the envelope/binding schema.
 - `0023_secure_auth_passkey_counter_revision.sql` adds `passkey_credentials.counter_revision`
   (`integer NOT NULL DEFAULT 0`) for compare-and-set counter updates. It is additive and does not

@@ -19,9 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **Dependency baseline.** The source integration is prepared for `@tgoliveira/vault-core@1.7.0`
-  and `@tgoliveira/secure-auth@0.9.0`; package manifests remain pinned to the latest published
-  `1.6.1` / `0.8.0` pair until both releases are available.
+- **Dependency baseline.** The application pins the published `@tgoliveira/vault-core@1.7.0`
+  and `@tgoliveira/secure-auth@0.9.1` releases. The secure-auth patch reports its package version
+  accurately through the delegated health endpoint.
 - **Authentication-confirmed passkey enrollment.** Registration detects capability only. Vault-only setup, recovery setup, and optional account-passkey composition now require one exact, user-mediated authentication ceremony before the first durable envelope is wrapped or persisted.
 - **Guided synced-passkey repair.** A candidate `no_match` leads directly to compatibility confirmation for the same logical credential. The user supplies an independent vault password or recovery phrase locally before one explicit WebAuthn prompt; known-good variants remain append-only.
 - **Explicit vs quick unlock.** Full unlock always uses the active credential allow-list, while dock quick unlock remains an exact browser-binding optimization.

@@ -1,7 +1,7 @@
 # Auth reset to `@tgoliveira/secure-auth`
 
 Branch: `main` (Phase 0 complete) · **Current published pin:** `0.8.0` (see `package.json`) ·
-**Prepared target:** `0.9.0` after publication
+**Current version:** `0.9.1`
 
 ## Goal
 
