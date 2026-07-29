@@ -482,6 +482,7 @@ export function buildSecureAuthConfigFromEnv(
         rpId: webauthn.rpId,
         rpName: webauthn.rpName,
         origin: webauthn.origin,
+        originAliasPolicy: env.NODE_ENV === "production" ? "none" : "apex-www",
         portableVaultGrants: resolvePortableVaultGrantConfig(env, baseUrl),
       };
     })(),

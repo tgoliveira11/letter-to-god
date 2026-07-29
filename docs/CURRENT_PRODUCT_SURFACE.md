@@ -104,7 +104,7 @@ Grouped by domain. Full tables: [`API_REFERENCE.md`](./API_REFERENCE.md), OpenAP
 | Encrypted local drafts | Shipped | IndexedDB; not server plaintext |
 | Vault auto-lock | Shipped | Client session timer |
 | Deterministic private state | Shipped | Server-seeded account snapshot; owner/lease/resource/generation guards discard stale async results across lock/logout/account replacement |
-| Portable passkey vault unlock | Shipped behind env gate | vault-core 1.8.1 broker envelope/session-cache flow + secure-auth 0.10.1 exact-credential grants; direct browser-to-broker flow and receipt-before-cache/session install |
+| Portable passkey vault unlock | Shipped behind env gate | vault-core 1.8.1 broker envelope/session-cache flow + secure-auth 0.10.2 internal-first exact-credential grants with hybrid fallback; direct browser-to-broker flow and receipt-before-cache/session install |
 | Passkey PRF vault unlock | Legacy dual-run | Existing envelopes remain readable until an owner-approved, epoch-scoped cleanup; new enrollment is disabled when portable mode is enabled |
 | Note Kanban generation | Shipped | Deterministic on-device parsing of decrypted note markdown; no LLM/plaintext egress |
 | Note ↔ Kanban bidirectional sync | Shipped | Note-bound boards sync checklist/list structure and card state client-side (debounced); encryption unchanged |

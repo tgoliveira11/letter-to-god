@@ -1,7 +1,7 @@
 # Portable passkey vault unlock
 
 SelahKeep uses the trusted broker protocol from `@tgoliveira/vault-core` 1.8.1 and the independent
-authorization ceremony from `@tgoliveira/secure-auth` 0.10.1. One synced account passkey may be
+authorization ceremony from `@tgoliveira/secure-auth` 0.10.2. One synced account passkey may be
 used for account login and portable vault authorization, but those remain separate actions.
 
 ## Security and ownership

@@ -197,11 +197,11 @@ Plaintext passwords are redacted from logs (`safeLogger`) and blocked from audit
 
 These flows protect **account authentication only**. They do **not** unlock, recover, rotate, or decrypt the private letters vault. User-facing copy states this on reset and change-password screens.
 
-**Account authentication** is implemented by `@tgoliveira/secure-auth@0.10.1` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
+**Account authentication** is implemented by `@tgoliveira/secure-auth@0.10.2` (thin app routes + `createSecureAuth` in `src/lib/secure-auth.ts`). See [`docs/AUTH_RESET_TO_SECURE_AUTH.md`](./docs/AUTH_RESET_TO_SECURE_AUTH.md).
 
 **Admin platform (0.4.1+)** — when `AUTH_ADMIN_ENABLED=true`, `/admin` and `/api/auth/admin/*` are served by the package. Unauthenticated users are redirected to login by `src/proxy.ts`; **role checks (`admin` vs `user`) are enforced in package API handlers**, not in the proxy. Bootstrap: set `ADMIN_BOOTSTRAP_EMAIL` to promote the first admin when none exists. This admin surface manages **accounts only** — it does not access vault keys or decrypted note content. App-specific `/api/admin/users/[id]` remains separate (self-summary only).
 
-**secure-auth 0.10.1 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending).
+**secure-auth 0.10.2 production requirements:** `AUTH_RATE_LIMIT_STORE=postgres` (and `RATE_LIMIT_STORE=postgres` for product APIs); opt in to `AUTH_TRUST_FORWARDED_HEADERS=true` only behind a trusted reverse proxy (e.g. Vercel). Admin APIs require fully authenticated sessions (not partial OAuth/2FA pending). Production sets `webauthn.originAliasPolicy="none"` because Vercel redirects the apex domain to the canonical `https://www.selahkeep.com` origin.
 
 **Package API security (0.1.21+)** — enforced inside `@tgoliveira/secure-auth` route handlers, not only in app middleware:
 

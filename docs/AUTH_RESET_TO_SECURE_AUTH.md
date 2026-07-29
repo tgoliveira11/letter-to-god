@@ -1,6 +1,6 @@
 # Auth reset to `@tgoliveira/secure-auth`
 
-Branch: `main` (Phase 0 complete) · **Current published range:** `^0.10.1` (see `package.json`)
+Branch: `main` (Phase 0 complete) · **Current published range:** `^0.10.2` (see `package.json`)
 
 > **Portable-vault amendment (2026-07-29):** The auth ownership reset remains current. The PRF
 > vault routes and post-login hook described in historical tables below are superseded by
@@ -109,4 +109,4 @@ npm run dev   # confirm http://localhost:3001/ loads
 
 ## Phase 0 status
 
-**Complete on `main`.** Account/auth is owned exclusively by `@tgoliveira/secure-auth` (currently `0.10.1`). Guard tests: `no-local-auth-implementation.test.ts`, `secure-auth-delegate-routes.test.ts`, `secure-auth-env-and-imports.test.ts`.
+**Complete on `main`.** Account/auth is owned exclusively by `@tgoliveira/secure-auth` (currently `0.10.2`). Guard tests: `no-local-auth-implementation.test.ts`, `secure-auth-delegate-routes.test.ts`, `secure-auth-env-and-imports.test.ts`.

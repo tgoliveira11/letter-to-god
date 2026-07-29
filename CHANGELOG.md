@@ -27,7 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - **Portable passkey vault unlock.** SelahKeep now integrates `vault-core` 1.8.1, the trusted
-  vault broker v1 protocol, and `secure-auth` 0.10.1 single-use ES256 grants/receipts so one synced
+  vault broker v1 protocol, and `secure-auth` 0.10.2 single-use ES256 grants/receipts so one synced
   account passkey can authorize vault unlock across browsers without relying on portable PRF output.
 - **Audited passkey cutover tooling.** Migration `0024_portable_vault_broker.sql` adds broker
   operations, pending/active portable mappings, and cleanup epochs. `npm run passkeys:cleanup`
@@ -37,8 +37,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Passkey account options.** Updated to `@tgoliveira/secure-auth@^0.10.2`; account login and
+  exact-credential grant ceremonies now prefer `internal` while preserving `hybrid` in the
+  allow-list and advisory hints. Production WebAuthn verification accepts only the documented
+  canonical `www.selahkeep.com` origin; the apex host continues to redirect there.
 - **Dependency baseline.** The application pins published `@tgoliveira/vault-core@1.8.1` and
-  requires `@tgoliveira/secure-auth@^0.10.1`.
+  requires `@tgoliveira/secure-auth@^0.10.2`.
 - **Passkey UX boundary.** Account settings manages account login credentials only. Vault settings
   explicitly enrolls, tests, and revokes portable vault access. Login never installs a vault key.
 - **Authentication-confirmed passkey enrollment.** Registration detects capability only. Vault-only setup, recovery setup, and optional account-passkey composition now require one exact, user-mediated authentication ceremony before the first durable envelope is wrapped or persisted.

@@ -82,6 +82,27 @@ describe("buildSecureAuthConfigFromEnv", () => {
     expect(config.sessions?.revocationPollIntervalSeconds).toBe(15);
   });
 
+  it("accepts only the canonical WebAuthn origin in production", () => {
+    const production = buildSecureAuthConfigFromEnv(
+      {
+        ...baseEnv,
+        NODE_ENV: "production",
+        APP_BASE_URL: "https://www.selahkeep.com",
+        WEBAUTHN_ORIGIN: "https://www.selahkeep.com",
+        WEBAUTHN_RP_ID: "selahkeep.com",
+      },
+      { appName: "SelahKeep", appSlug: "letters-to-god", baseUrl: "http://localhost:3001" }
+    );
+    expect(production.webauthn?.originAliasPolicy).toBe("none");
+
+    const local = buildSecureAuthConfigFromEnv(baseEnv, {
+      appName: "Test",
+      appSlug: "test",
+      baseUrl: "http://localhost:3001",
+    });
+    expect(local.webauthn?.originAliasPolicy).toBe("apex-www");
+  });
+
   it("falls back to legacy env names", () => {
     const config = buildSecureAuthConfigFromEnv(
       {
