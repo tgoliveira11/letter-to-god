@@ -14,7 +14,7 @@ describe("deterministic application-state contract", () => {
       dependencies: Record<string, string>;
     };
     expect(packageJson.dependencies).toMatchObject({
-      "@tgoliveira/secure-auth": "0.9.0",
+      "@tgoliveira/secure-auth": "0.9.1",
       "@tgoliveira/vault-core": "1.7.0",
       "@tgoliveira/outpost": "1.2.2",
       next: "16.2.11",
