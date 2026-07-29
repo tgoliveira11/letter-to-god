@@ -6,6 +6,30 @@ export function createContentSecurityPolicyNonce(): string {
   return Buffer.from(randomUUID()).toString("base64");
 }
 
+/**
+ * Returns the one exact HTTPS origin that the browser may contact for the
+ * portable vault broker. Invalid or over-broad values fail closed.
+ */
+export function getPortableVaultBrokerConnectSource(
+  env: NodeJS.ProcessEnv = process.env
+): string | undefined {
+  if (env.VAULT_PORTABLE_BROKER_ENABLED?.trim() !== "true") return undefined;
+
+  const raw = env.VAULT_PORTABLE_BROKER_URL?.trim();
+  if (!raw) return undefined;
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:") return undefined;
+    if (parsed.username || parsed.password) return undefined;
+    if (parsed.pathname !== "/" || parsed.search || parsed.hash) return undefined;
+    if (!parsed.hostname || parsed.hostname.includes("*")) return undefined;
+    return parsed.origin;
+  } catch {
+    return undefined;
+  }
+}
+
 export function buildContentSecurityPolicy(nonce: string): string {
   const isDev = process.env.NODE_ENV === "development";
 
@@ -13,7 +37,13 @@ export function buildContentSecurityPolicy(nonce: string): string {
   // from a (self-hostable) model host. Audio and transcript never leave the
   // device; only these content-free origins need network access.
   const voiceSources = getVoiceModelConnectSources();
-  const connectSrc = ["'self'", ...(isDev ? ["ws:"] : []), ...voiceSources].join(" ");
+  const portableVaultBrokerSource = getPortableVaultBrokerConnectSource();
+  const connectSrc = [
+    "'self'",
+    ...(isDev ? ["ws:"] : []),
+    ...voiceSources,
+    ...(portableVaultBrokerSource ? [portableVaultBrokerSource] : []),
+  ].join(" ");
 
   const directives = [
     "default-src 'self'",

@@ -126,7 +126,7 @@ and databases.
 | Variable | Required when enabled | Production value / format |
 |---|---|---|
 | `VAULT_PORTABLE_BROKER_ENABLED` | Yes | `true` only after migration and broker registration |
-| `VAULT_PORTABLE_BROKER_URL` | Yes | `https://vault-broker-green.vercel.app` |
+| `VAULT_PORTABLE_BROKER_URL` | Yes | `https://vault-broker-green.vercel.app` — exact HTTPS origin only: no credentials, path, query, fragment, or wildcard. The validated origin is added to CSP `connect-src` only while the portable broker feature is enabled. |
 | `VAULT_LEGACY_PASSKEY_PRF_ENROLLMENT_ENABLED` | Recommended explicit | `false` |
 | `PORTABLE_VAULT_GRANT_ISSUER` | Yes | `https://www.selahkeep.com` |
 | `PORTABLE_VAULT_BROKER_APP_ID` | Yes | `selahkeep` |
