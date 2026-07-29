@@ -100,6 +100,7 @@ export function useVault() {
           const vaultKey = await unlockWithPortablePasskey({
             mapping,
             brokerUrl: features.portableVaultBroker.brokerUrl,
+            operation,
           });
           if (!isVaultSessionOperationCurrent(operation)) {
             throw new VaultSessionOperationCancelledError("stale_operation");

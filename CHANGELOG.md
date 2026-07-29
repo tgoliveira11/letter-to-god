@@ -15,13 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Updated portable passkey enrollment and unlock for `vault-core` 1.8.1 so an already-open,
+  non-extractable vault key is re-wrapped from owner-scoped memory, and broker receipt verification
+  succeeds before that re-wrap cache is committed.
 - Fixed the passkey cleanup runner to open PostgreSQL serializable transactions with valid
   postgres.js isolation-level syntax.
 
 ### Added
 
-- **Portable passkey vault unlock.** SelahKeep now integrates `vault-core` 1.8.0, the trusted
-  vault broker v1 protocol, and `secure-auth` 0.10.0 single-use ES256 grants/receipts so one synced
+- **Portable passkey vault unlock.** SelahKeep now integrates `vault-core` 1.8.1, the trusted
+  vault broker v1 protocol, and `secure-auth` 0.10.1 single-use ES256 grants/receipts so one synced
   account passkey can authorize vault unlock across browsers without relying on portable PRF output.
 - **Audited passkey cutover tooling.** Migration `0024_portable_vault_broker.sql` adds broker
   operations, pending/active portable mappings, and cleanup epochs. `npm run passkeys:cleanup`
@@ -31,8 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **Dependency baseline.** The application pins published `@tgoliveira/vault-core@1.8.0` and
-  `@tgoliveira/secure-auth@0.10.0` releases.
+- **Dependency baseline.** The application pins published `@tgoliveira/vault-core@1.8.1` and
+  requires `@tgoliveira/secure-auth@^0.10.1`.
 - **Passkey UX boundary.** Account settings manages account login credentials only. Vault settings
   explicitly enrolls, tests, and revokes portable vault access. Login never installs a vault key.
 - **Authentication-confirmed passkey enrollment.** Registration detects capability only. Vault-only setup, recovery setup, and optional account-passkey composition now require one exact, user-mediated authentication ceremony before the first durable envelope is wrapped or persisted.

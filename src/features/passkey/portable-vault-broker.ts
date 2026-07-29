@@ -5,9 +5,10 @@ import {
   type PortableVaultOpaqueAadScope,
 } from "@tgoliveira/vault-core";
 import {
-  createPortableVaultBrokerEnrollmentPackage,
+  createPortableVaultBrokerEnrollmentPackageWithSessionCache,
   createPortableVaultBrokerUnlockSession,
   assertVaultSessionOperationCurrent,
+  isPortableVaultBrokerUnlockResponse,
   serializePortableVaultBrokerEnrollmentPackage,
   unlockPortableVaultBrokerResponse,
 } from "@tgoliveira/vault-core/browser";
@@ -108,10 +109,11 @@ export async function enrollPortablePasskey(input: {
   assertVaultSessionOperationCurrent(input.operation);
   const vaultKey = getUserVaultKey();
   if (!vaultKey) throw new Error("Unlock the vault before enabling portable passkey unlock");
-  const enrollment = await createPortableVaultBrokerEnrollmentPackage({
+  const enrollment = await createPortableVaultBrokerEnrollmentPackageWithSessionCache({
     vaultKey,
     opaqueScope: prepared.opaqueScope,
     profile: SELAHKEEP_VAULT_PROFILE,
+    operation: input.operation,
   });
 
   try {
@@ -153,6 +155,7 @@ export async function enrollPortablePasskey(input: {
 export async function unlockWithPortablePasskey(input: {
   mapping: PortableVaultMapping;
   brokerUrl: string;
+  operation: VaultSessionOperation;
 }): Promise<CryptoKey> {
   if (!input.mapping.brokerEnvelopeId || input.mapping.state !== "active") {
     throw new Error("Portable vault mapping is not active");
@@ -174,27 +177,37 @@ export async function unlockWithPortablePasskey(input: {
         ephemeralPublicJwk: session.publicJwk,
       }
     );
+    if (!isPortableVaultBrokerUnlockResponse(response)) {
+      throw new Error("Portable vault broker returned an invalid unlock response");
+    }
+    if (response.requestId !== grant.requestId) {
+      throw new Error("Portable vault broker request mismatch");
+    }
     const unlocked = await unlockPortableVaultBrokerResponse({
       response,
       session,
       expectedOpaqueScope: input.mapping.opaqueScope as PortableVaultOpaqueAadScope,
       profile: SELAHKEEP_VAULT_PROFILE,
+      operation: input.operation,
+      verifyAndConsumeCompletionReceipt: async (receipt) => {
+        const finalized = await passkeyPortableVaultGrantApi.finalizeReceipt(receipt);
+        assertFinalized(finalized, {
+          action: "unlock",
+          requestId: grant.requestId,
+          credentialId: grant.verifiedCredentialId,
+          envelopeId: input.mapping.brokerEnvelopeId!,
+        });
+      },
     });
+    if (unlocked.status === "completion_receipt_rejected") {
+      throw new Error("Portable passkey completion receipt was rejected");
+    }
     if (unlocked.status !== "unlocked") {
       throw new Error(`Portable passkey unlock failed: ${unlocked.status}`);
     }
     if (unlocked.requestId !== grant.requestId) {
       throw new Error("Portable vault broker request mismatch");
     }
-    const finalized = await passkeyPortableVaultGrantApi.finalizeReceipt(
-      unlocked.completionReceipt
-    );
-    assertFinalized(finalized, {
-      action: "unlock",
-      requestId: grant.requestId,
-      credentialId: grant.verifiedCredentialId,
-      envelopeId: input.mapping.brokerEnvelopeId,
-    });
     return unlocked.vaultKey;
   } finally {
     session.dispose();

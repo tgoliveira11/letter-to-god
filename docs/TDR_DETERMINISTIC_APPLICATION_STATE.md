@@ -96,7 +96,7 @@ Offline support does not copy private resource state into a global store. Encryp
 
 ## Preferences API and migration
 
-SelahKeep delegates preferences to secure-auth 0.10.0:
+SelahKeep delegates preferences to secure-auth 0.10.1:
 
 | Method/path | Purpose |
 |---|---|
@@ -116,8 +116,8 @@ The migration is additive. Application rollback may safely leave `user_preferenc
 
 The deterministic state contract is pinned to:
 
-- `@tgoliveira/secure-auth@0.10.0`
-- `@tgoliveira/vault-core@1.8.0`
+- `@tgoliveira/secure-auth@0.10.1`
+- `@tgoliveira/vault-core@1.8.1`
 - `@tgoliveira/outpost@1.2.2`
 - `next@16.2.11`
 - `next-auth@4.24.15`

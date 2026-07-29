@@ -116,7 +116,11 @@ export function PortablePasskeyVaultSetup({
                     async () => {
                       const currentVaultKey = getUserVaultKey();
                       if (!currentVaultKey) throw new Error("Unlock the vault before testing");
-                      const restored = await unlockWithPortablePasskey({ mapping, brokerUrl });
+                      const restored = await unlockWithPortablePasskey({
+                        mapping,
+                        brokerUrl,
+                        operation: beginVaultOwnerOperation(userId),
+                      });
                       if (!(await userVaultKeysEqual(currentVaultKey, restored))) {
                         throw new Error("Portable passkey does not unlock this vault");
                       }
