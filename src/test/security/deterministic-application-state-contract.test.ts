@@ -14,7 +14,7 @@ describe("deterministic application-state contract", () => {
       dependencies: Record<string, string>;
     };
     expect(packageJson.dependencies).toMatchObject({
-      "@tgoliveira/secure-auth": "^0.10.2",
+      "@tgoliveira/secure-auth": "^0.11.0",
       "@tgoliveira/vault-core": "1.8.1",
       "@tgoliveira/outpost": "1.2.2",
       next: "16.2.11",
@@ -28,7 +28,7 @@ describe("deterministic application-state contract", () => {
     const providers = source("src/components/secure-auth-providers.tsx");
 
     expect(bootstrap).toContain('import "server-only"');
-    expect(bootstrap).toContain("secureAuth.uiConfig");
+    expect(bootstrap).toContain("secureAuth.getResolvedUIConfig()");
     expect(bootstrap).toContain("Promise.allSettled");
     expect(bootstrap).not.toContain("@/lib/crypto-client/notes");
     expect(bootstrap).not.toContain("getSessionVaultKey");
