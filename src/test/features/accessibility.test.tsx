@@ -28,6 +28,7 @@ vi.mock("@tgoliveira/secure-auth/react/client", () => ({
   signInWithPasskey: vi.fn(),
   isPasskeyLoginSupported: vi.fn(() => false),
   getPasskeyLoginUnsupportedMessage: () => "This browser does not support passkey sign-in.",
+  useSecureAuthUi: () => ({ paths: { afterLogout: "/" } }),
 }));
 
 function withSecureAuthUi(children: React.ReactNode) {
