@@ -225,6 +225,27 @@ describe("buildSecureAuthConfigFromEnv", () => {
     expect(ui.auth.authenticatedRedirectPath).toBe("/vault");
   });
 
+  it("enables the two-step login page by default and allows opting out", () => {
+    const defaults = { appName: "SelahKeep", appSlug: "letters-to-god", baseUrl: "http://localhost:3001" };
+
+    expect(buildSecureAuthConfigFromEnv(baseEnv, defaults).ui?.login?.twoStep).toBe(true);
+    expect(
+      buildSecureAuthConfigFromEnv({ ...baseEnv, AUTH_LOGIN_TWO_STEP: "false" }, defaults).ui?.login
+        ?.twoStep
+    ).toBe(false);
+    expect(buildSecureAuthUiPublicConfigFromEnv(baseEnv, defaults).login?.twoStep).toBe(true);
+  });
+
+  it("sends sign-out to the app home unless overridden", () => {
+    const defaults = { appName: "SelahKeep", appSlug: "letters-to-god", baseUrl: "http://localhost:3001" };
+
+    expect(buildSecureAuthConfigFromEnv(baseEnv, defaults).auth?.afterLogoutPath).toBe("/");
+    expect(
+      buildSecureAuthConfigFromEnv({ ...baseEnv, AUTH_AFTER_LOGOUT_PATH: "/login" }, defaults).auth
+        ?.afterLogoutPath
+    ).toBe("/login");
+  });
+
   it("builds public UI config without server secrets", () => {
     const config = buildSecureAuthUiPublicConfigFromEnv(
       { APP_BASE_URL: "http://localhost:3001", PASSWORD_MIN_LENGTH: "10" },

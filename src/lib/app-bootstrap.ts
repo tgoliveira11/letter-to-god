@@ -64,7 +64,8 @@ export async function resolveAppBootstrap(): Promise<AppBootstrapSnapshot> {
   // This prevents vault metadata from entering the bootstrap before the account
   // authentication boundary is complete.
   const ownerId = isFullyAuthenticatedSession(session) ? (session?.user?.id ?? null) : null;
-  const uiConfig = secureAuth.uiConfig;
+  // Resolved (not static) so admin panel overrides such as `ui.login.twoStep` reach the client.
+  const uiConfig = await secureAuth.getResolvedUIConfig();
   const portableVaultBroker = resolvePortableVaultBrokerPublicConfig();
 
   if (!ownerId) {

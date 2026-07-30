@@ -64,7 +64,7 @@ function parseSecureAuthEnv(
   const twoFactorEncryptionKey = readEnv(env, "TWO_FACTOR_SECRET_ENCRYPTION_KEY");
 
   const afterLoginPath = readEnv(env, "AUTH_AFTER_LOGIN_PATH") ?? "/home";
-  const afterLogoutPath = readEnv(env, "AUTH_AFTER_LOGOUT_PATH") ?? "/login";
+  const afterLogoutPath = readEnv(env, "AUTH_AFTER_LOGOUT_PATH") ?? "/";
   const authenticatedRedirectPath =
     readEnv(env, "AUTH_AUTHENTICATED_REDIRECT_PATH") ?? afterLoginPath;
   const redirectAuthenticatedFromGuestPages = readBoolEnv(
@@ -108,6 +108,10 @@ function parseSecureAuthEnv(
     singleActiveSession ? 10 : 0,
     { min: 0, max: 3600 }
   );
+
+  // Email-first login: /login asks for the email (with magic link and OAuth), then password
+  // and passkey. Runtime-overridable from the admin panel via `ui.login.twoStep`.
+  const loginTwoStep = readBoolEnv(env, "AUTH_LOGIN_TWO_STEP", true);
 
   const passwordStrengthPosition = readEnumEnv(
     env,
@@ -252,6 +256,7 @@ function parseSecureAuthEnv(
     singleActiveSession,
     revocationPollIntervalSeconds,
     passwordStrengthPosition,
+    loginTwoStep,
     cookieSecure,
     googleClientId,
     googleClientSecret,
@@ -316,6 +321,9 @@ export function buildSecureAuthUiPublicConfigFromEnv(
       redirectAuthenticatedFromGuestPages: parsed.redirectAuthenticatedFromGuestPages,
       authenticatedRedirectPath: parsed.authenticatedRedirectPath,
     },
+    login: {
+      twoStep: parsed.loginTwoStep,
+    },
   };
 }
 
@@ -355,6 +363,7 @@ export function buildSecureAuthConfigFromEnv(
     singleActiveSession,
     revocationPollIntervalSeconds,
     passwordStrengthPosition,
+    loginTwoStep,
     cookieSecure,
     googleClientId,
     googleClientSecret,
@@ -491,6 +500,9 @@ export function buildSecureAuthConfigFromEnv(
       messages: { ...authPageMessages },
       passwordStrength: {
         position: passwordStrengthPosition,
+      },
+      login: {
+        twoStep: loginTwoStep,
       },
     },
     admin: {

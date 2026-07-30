@@ -74,15 +74,15 @@ describe("no local auth implementation guard", () => {
     }
   });
 
-  it("requires @tgoliveira/secure-auth 0.10.2 and resolves that release", () => {
+  it("requires @tgoliveira/secure-auth 0.11.0 and resolves that release", () => {
     const packageJson = JSON.parse(readSource("package.json")) as {
       dependencies: Record<string, string>;
     };
-    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("^0.10.2");
+    expect(packageJson.dependencies["@tgoliveira/secure-auth"]).toBe("^0.11.0");
 
     const lockfile = readSource("package-lock.json");
-    expect(lockfile).toContain('"@tgoliveira/secure-auth": "^0.10.2"');
-    expect(lockfile).toContain("secure-auth-0.10.2.tgz");
+    expect(lockfile).toContain('"@tgoliveira/secure-auth": "^0.11.0"');
+    expect(lockfile).toContain("secure-auth-0.11.0.tgz");
   });
 
   it("uses the package-owned account-only 2FA explanation", () => {
