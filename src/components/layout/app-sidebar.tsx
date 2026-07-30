@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppMark } from "@/components/ui/app-mark";
-import { signOutAccount, signOutWithRedirect } from "@/lib/auth/sign-out-client";
+import { signOutAccount, signOutWithRedirect, useAfterLogoutPath } from "@/lib/auth/sign-out-client";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import { useVaultClientStatus } from "@/features/vault/use-vault-client-status";
 import { useApplicationState } from "@/components/application-state-provider";
@@ -122,6 +122,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const vaultClient = useVaultClientStatus();
+  const afterLogoutPath = useAfterLogoutPath();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -150,7 +151,7 @@ export function AppSidebar() {
       }
     }
     await signOutAccount();
-    signOutWithRedirect("/");
+    signOutWithRedirect(afterLogoutPath);
   }
 
   const onNotes = pathname === "/notes";

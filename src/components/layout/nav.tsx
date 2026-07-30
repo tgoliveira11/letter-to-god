@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOutAccount, signOutWithRedirect } from "@/lib/auth/sign-out-client";
+import { signOutAccount, signOutWithRedirect, useAfterLogoutPath } from "@/lib/auth/sign-out-client";
 import { isFullyAuthenticatedSession } from "@/lib/auth/session-state";
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ export function Nav() {
   const { session } = useApplicationState();
   const authenticated = isFullyAuthenticatedSession(session);
   const pathname = usePathname();
+  const afterLogoutPath = useAfterLogoutPath();
   const menuId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -41,7 +42,7 @@ export function Nav() {
       }
     }
     await signOutAccount();
-    signOutWithRedirect("/");
+    signOutWithRedirect(afterLogoutPath);
   }
 
   return (
